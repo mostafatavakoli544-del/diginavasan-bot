@@ -3,3 +3,4 @@ requests
 jdatetime
 hijri-converter
 pytz
+supabase

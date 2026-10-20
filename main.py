@@ -1,15 +1,11 @@
 import os
 import logging
 import requests
-import pytz
-from datetime import datetime
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = os.environ.get("BOT_TOKEN")
-PORT = int(os.environ.get("PORT", 10000))
-RENDER_URL = os.environ.get("RENDER_URL")
 
 def get_price_from_api(symbol):
     try:
@@ -51,9 +47,5 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('price', price))
     
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TOKEN,
-        webhook_url=f"{RENDER_URL}/{TOKEN}"
-    )
+    print("ربات روشن شد...")
+    app.run_polling()

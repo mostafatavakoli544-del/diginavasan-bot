@@ -2,3 +2,4 @@ python-telegram-bot[passport,job-queue]
 requests
 jdatetime
 hijri-converter
+pytz

@@ -9,19 +9,20 @@ import jdatetime
 from hijri_converter import convert
 from datetime import datetime, time
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from supabase import create_client, Client
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 CHANNEL_ID = "@diginavasan"
-
-# ⚠️ آیدی عددی خودت (برای قفل امنیتی دستورات)
 ADMIN_ID = 718840144 
 
-# ==========================================
-# ⚙️ تنظیمات و متن‌های قابل ویرایش
-# ==========================================
+# اتصال به دیتابیس Supabase
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 TEMPLATES = {
     "fiat_title": "💱 **قیمت لحظه‌ای ارزها**",
     "gold_title": "🌕 **قیمت لحظه‌ای طلا و سکه**",
@@ -29,13 +30,9 @@ TEMPLATES = {
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
 
-# ==========================================
-# ⚙️ توابع پایه (وب‌سرور و زمان)
-# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Web server listening on port {PORT}")
         httpd.serve_forever()
 
 def get_dates_info():
@@ -54,9 +51,6 @@ def is_working_hours():
     _, _, _, _, _, hour = get_dates_info()
     return 8 <= hour < 20
 
-# ==========================================
-# ⚙️ توابع گرفتن قیمت
-# ==========================================
 def get_nerkh_price(key):
     try:
         url = "https://nerkh.jahankhahan.shop/data/live.json"
@@ -84,9 +78,7 @@ def get_nobitex_price(symbol):
     except Exception:
         return "خطا"
 
-# ==========================================
-# ⚙️ پیام‌های صبح و شب
-# ==========================================
+# --- پیام‌های کانال ---
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     day, shamsi, hijri, greg, t, _ = get_dates_info()
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
@@ -110,9 +102,6 @@ async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
 @diginavasan"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-# ==========================================
-# ⚙️ پیام‌های چرخشی نرخ‌ها
-# ==========================================
 async def send_fiat_prices(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
     usd = get_nerkh_price("dollar")
@@ -166,14 +155,9 @@ async def send_crypto_prices(context: ContextTypes.DEFAULT_TYPE):
 {TEMPLATES['footer']}"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-# ==========================================
-# ⚙️ سیستم چرخش خودکار
-# ==========================================
 _rotation_index = 0
-
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
-    if not is_working_hours():
-        return
+    if not is_working_hours(): return
     global _rotation_index
     jobs = [send_fiat_prices, send_gold_prices, send_crypto_prices]
     current_job = jobs[_rotation_index % len(jobs)]
@@ -181,39 +165,64 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await current_job(context)
 
 # ==========================================
-# ⚙️ دستورات تست (فقط برای مدیر)
+# سیستم دعوت از دوستان
 # ==========================================
 async def start(update, context):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="سلام! به ربات دیجی نوسان خوش آمدید. ✅\nبرای دیدن قیمت‌ها به کانال ما بپیوندید: @diginavasan")
+    user_id = update.effective_user.id
+    
+    try:
+        # بررسی اینکه آیا کاربر قبلاً ثبت‌نام کرده یا نه
+        response = supabase.table('users').select('*').eq('user_id', user_id).execute()
+        
+        if not response.data:
+            invited_by = None
+            # چک کردن اینکه آیا با لینک دعوت اومده یا نه
+            if context.args:
+                try:
+                    invited_by = int(context.args[0])
+                except ValueError:
+                    pass
+            
+            # ثبت کاربر جدید در دیتابیس
+            supabase.table('users').insert({"user_id": user_id, "invited_by": invited_by}).execute()
+            
+            # اگه با لینک کسی اومده بود، تعداد دعوت‌های اون شخص رو زیاد کن
+            if invited_by:
+                inviter_res = supabase.table('users').select('invite_count').eq('user_id', invited_by).execute()
+                if inviter_res.data:
+                    new_count = inviter_res.data[0]['invite_count'] + 1
+                    supabase.table('users').update({"invite_count": new_count}).eq('user_id', invited_by).execute()
+                    try:
+                        # اطلاع دادن به شخص دعوت‌کننده
+                        await context.bot.send_message(chat_id=invited_by, text=f"🎉 یک کاربر جدید با لینک شما به ربات پیوست!\nتعداد کل دعوت‌های شما: {new_count}")
+                    except:
+                        pass
+    except Exception as e:
+        print(f"DB Error: {e}")
 
-async def test_morning(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⛔ شما دسترسی به این دستور ندارید.")
-        return
-    await send_morning_message(context)
+    # ساخت لینک اختصاصی برای کاربر
+    invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+    
+    welcome_msg = f"""سلام! به ربات دیجی نوسان خوش آمدید. ✅
+    
+🔗 **لینک دعوت اختصاصی شما:**
+`{invite_link}`
 
-async def test_night(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⛔ شما دسترسی به این دستور ندارید.")
-        return
-    await send_night_message(context)
+با ارسال این لینک به دوستانتان و دعوت آن‌ها، می‌توانید امتیاز جمع کنید."""
+    
+    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown')
 
+# --- دستورات تست (فقط مدیر) ---
 async def test_fiat(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⛔ شما دسترسی به این دستور ندارید.")
-        return
+    if update.effective_user.id != ADMIN_ID: return
     await send_fiat_prices(context)
 
 async def test_gold(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⛔ شما دسترسی به این دستور ندارید.")
-        return
+    if update.effective_user.id != ADMIN_ID: return
     await send_gold_prices(context)
 
 async def test_crypto(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⛔ شما دسترسی به این دستور ندارید.")
-        return
+    if update.effective_user.id != ADMIN_ID: return
     await send_crypto_prices(context)
 
 if __name__ == '__main__':
@@ -222,17 +231,14 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('test_morning', test_morning))
-    app.add_handler(CommandHandler('test_night', test_night))
     app.add_handler(CommandHandler('fiat', test_fiat))
     app.add_handler(CommandHandler('gold', test_gold))
     app.add_handler(CommandHandler('crypto', test_crypto))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
-    
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=480, first=10)
     
-    print("ربات روشن شد. سیستم امنیتی فعال است...")
+    print("ربات روشن شد. سیستم دعوت متصل به دیتابیس فعال است...")
     app.run_polling()

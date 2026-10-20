@@ -7,15 +7,14 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 TOKEN = os.environ.get("BOT_TOKEN")
 
-# تابع جدید برای گرفتن قیمت از API نرخ‌ها
 def get_nerkh_price(key):
     try:
         url = "https://nerkh.jahankhahan.shop/data/live.json"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            # این API قیمت‌ها رو داخل کلید rates برمی‌گردونه
-            price = data['rates'].get(key, {}).get('price')
+            # API قیمت‌ها رو مستقیم داخل کلید rates برمی‌گردونه (مثلاً rates["dollar"])
+            price = data['rates'].get(key)
             if price:
                 return f"{price:,.0f}"
         return "نامشخص"
@@ -23,7 +22,6 @@ def get_nerkh_price(key):
         print(f"Error fetching {key}: {e}")
         return "خطا"
 
-# تابع گرفتن قیمت تتر از نوبیتکس (این همون قبلیه که درست کار می‌کرد)
 def get_usdt_nobitex():
     try:
         url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls"
@@ -40,12 +38,10 @@ def get_usdt_nobitex():
 
 async def send_prices_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id):
     try:
-        # گرفتن قیمت‌ها از API جدید
         usd = get_nerkh_price("dollar")
-        gold18 = get_nerkh_price("gold_18k")
-        coin_emami = get_nerkh_price("sekke_emami")
+        gold18 = get_nerkh_price("gold")  # این API کلید "gold" برای طلای ۱۸ عیار داره
+        coin_emami = get_nerkh_price("emami_coin")  # یا کلید مربوط به سکه
         
-        # گرفتن تتر از نوبیتکس
         usdt = get_usdt_nobitex()
 
         msg = f"""💰 **قیمت لحظه‌ای**

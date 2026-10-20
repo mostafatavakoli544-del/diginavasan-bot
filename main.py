@@ -77,7 +77,7 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
-# تابع جدید برای گرفتن قیمت کریپتو از CoinGecko (بدون بلاک شدن)
+# تابع کریپتو (از CoinGecko)
 def get_crypto_price_toman(coin_id, usd_price_float):
     if usd_price_float <= 0:
         return "نامشخص"
@@ -97,12 +97,12 @@ def get_crypto_price_toman(coin_id, usd_price_float):
 # ==========================================
 def generate_fiat_msg():
     _, _, _, _, t, _ = get_dates_info()
-    usd = get_nerkh_price_safe(["dollar", "usd"])
-    eur = get_nerkh_price_safe(["euro", "eur"])
-    gbp = get_nerkh_price_safe(["pound", "gbp"])
-    aed = get_nerkh_price_safe(["dirham", "aed"])
-    try_price = get_nerkh_price_safe(["lira", "try"])
-    cny = get_nerkh_price_safe(["yuan", "cny"])
+    usd = get_nerkh_price_safe(["dollar"])
+    eur = get_nerkh_price_safe(["euro"])
+    gbp = get_nerkh_price_safe(["pound"])
+    aed = get_nerkh_price_safe(["aed"])
+    try_price = get_nerkh_price_safe(["lira"])
+    cny = get_nerkh_price_safe(["yuan"])
     
     return f"""{TEMPLATES['fiat_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
@@ -117,27 +117,31 @@ def generate_fiat_msg():
 
 def generate_gold_msg():
     _, _, _, _, t, _ = get_dates_info()
-    gold18 = get_nerkh_price_safe(["gold", "gold_18k"])
-    # اضافه کردن اسم‌های مختلف برای سکه‌ها
-    coin_emami = get_nerkh_price_safe(["sekke_emami", "emami", "emami_coin", "coin_emami", "sekkeh"])
-    coin_bahar = get_nerkh_price_safe(["sekke_bahar", "bahar", "coin_bahar"])
-    coin_nim = get_nerkh_price_safe(["sekke_nim", "nim", "half_coin", "coin_nim"])
-    coin_rob = get_nerkh_price_safe(["sekke_rob", "rob", "quarter_coin", "coin_rob"])
+    gold18 = get_nerkh_price_safe(["gold"])
+    gold24 = get_nerkh_price_safe(["gold24"])
+    coin_emami = get_nerkh_price_safe(["coin"])
+    coin_bahar = get_nerkh_price_safe(["bahar"])
+    coin_nim = get_nerkh_price_safe(["half"])
+    coin_rob = get_nerkh_price_safe(["quarter"])
+    mesghal = get_nerkh_price_safe(["mesghal"])
+    silver = get_nerkh_price_safe(["silver"])
     
     return f"""{TEMPLATES['gold_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
 
 🌕 طلا ۱۸ عیار = \u200e`{gold18}` تومان
+🌕 طلا ۲۴ عیار = \u200e`{gold24}` تومان
+⚖️ مثقال طلا = \u200e`{mesghal}` تومان
 🪙 سکه امامی = \u200e`{coin_emami}` تومان
 🪙 سکه بهار = \u200e`{coin_bahar}` تومان
 🪙 نیم سکه = \u200e`{coin_nim}` تومان
 🪙 ربع سکه = \u200e`{coin_rob}` تومان
+🥈 نقره = \u200e`{silver}` تومان
 {TEMPLATES['footer']}"""
 
 def generate_crypto_msg():
     _, _, _, _, t, _ = get_dates_info()
-    # گرفتن قیمت دلار برای تبدیل
-    usd_str = get_nerkh_price_safe(["dollar", "usd"])
+    usd_str = get_nerkh_price_safe(["dollar"])
     usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
     
     btc = get_crypto_price_toman("bitcoin", usd_float)
@@ -301,7 +305,7 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text="خطا در بررسی دیتابیس. لطفاً بعداً تلاش کنید.")
             return ConversationHandler.END
 
-    gold_price = get_nerkh_price_safe(["gold", "gold_18k"])
+    gold_price = get_nerkh_price_safe(["gold"])
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"🧮 **ماشین‌حساب طلا**\n\n"
@@ -415,7 +419,6 @@ if __name__ == '__main__':
     
     app.add_handler(gold_conv_handler)
     app.add_handler(CommandHandler('start', start))
-    
     app.add_handler(MessageHandler(filters.Regex("^(💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🚗 قیمت خودرو \\(به‌زودی\\)|🎁 دعوت از دوستان)$"), handle_menu_text))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
@@ -423,5 +426,5 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=480, first=10)
     
-    print("ربات روشن شد. باگ سکه‌ها و کریپتو رفع شد...")
+    print("ربات روشن شد. سکه‌ها با کلیدهای جدید تنظیم شدند...")
     app.run_polling()

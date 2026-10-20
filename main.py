@@ -8,8 +8,6 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 TOKEN = os.environ.get("BOT_TOKEN")
-PORT = int(os.environ.get("PORT", 10000))
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
 PROXY_URL = "https://square-wood-1983.mostafatavakoli544.workers.dev"
 
 def get_tgju_price(item_name, to_toman=False):
@@ -137,11 +135,9 @@ if __name__ == '__main__':
         .base_file_url(f"{PROXY_URL}/file/bot")
         .build()
     )
+    
     app.add_handler(CommandHandler('start', start))
     app.job_queue.run_repeating(rotate_jobs, interval=300, first=10)
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TOKEN,
-        webhook_url=f"{RENDER_URL}/{TOKEN}"
-    )
+    
+    # اجرای ربات با روش Polling (مناسب برای Render)
+    app.run_polling()

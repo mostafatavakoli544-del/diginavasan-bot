@@ -7,102 +7,50 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# تنظیمات
 TOKEN = os.environ.get("BOT_TOKEN")
-PROXY_URL = "https://square-wood-1983.mostafatavakoli544.workers.dev"
-
-# تنظیمات Webhook برای Render
 PORT = int(os.environ.get("PORT", 10000))
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+RENDER_URL = os.environ.get("RENDER_URL")
 
-# تابع جدید برای گرفتن قیمت از priceto.day
 def get_price_from_api(symbol):
     try:
         url = f"https://api.priceto.day/v1/latest/irr/{symbol}"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            price = data.get('price')
-            if price:
-                return f"{price:,.0f}"
+            return f"{data.get('price', 0):,.0f}"
         return "نامشخص"
-    except Exception as e:
-        print(f"Error fetching {symbol}: {e}")
+    except:
         return "خطا"
 
-# تابع گرفتن قیمت تتر از نوبیتکس
 def get_usdt_nobitex():
     try:
         url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             data = response.json()
-            price_rial = float(data['stats']['usdt-rls']['latest'])
-            price_toman = int(price_rial / 10)
+            price_toman = int(float(data['stats']['usdt-rls']['latest']) / 10)
             return f"{price_toman:,.0f}"
         return "نامشخص"
-    except Exception as e:
-        print(f"Error fetching Nobitex USDT: {e}")
+    except:
         return "خطا"
 
-# تابع گرفتن انس جهانی
-def get_global_ounce():
-    try:
-        res = requests.get("https://api.gold-api.com/price/XAU", timeout=10)
-        gold_ounce = round(res.json()['price'], 2)
-        res2 = requests.get("https://api.gold-api.com/price/XAG", timeout=10)
-        silver_ounce = round(res2.json()['price'], 2)
-        return f"{gold_ounce:,.2f}", f"{silver_ounce:,.2f}"
-    except Exception:
-        return "خطا", "خطا"
-
-# تابع ارسال پیام قیمت‌ها
 async def send_prices_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id):
-    try:
-        usd = get_price_from_api("usd")
-        eur = get_price_from_api("eur")
-        gbp = get_price_from_api("gbp")
-        usdt = get_usdt_nobitex()
-        ounce_gold, ounce_silver = get_global_ounce()
-
-        msg = f"""💰 **قیمت لحظه‌ای (تست نهایی)**
-
-💵 قیمت دلار = `{usd}` تومان
-💵 قیمت یورو = `{eur}` تومان
-💵 قیمت پوند = `{gbp}` تومان
-
-🟢 قیمت تتر (نوبیتکس) = `{usdt}` تومان
-
-🌕 اونس جهانی طلا = `{ounce_gold}` دلار
-🪙 اونس جهانی نقره = `{ounce_silver}` دلار
-
-*💰 قیمت لحظه‌ای دیجی نوسان 👇*
-@diginavasan"""
-        await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-    except Exception as e:
-        print(f"❌ خطا در ساخت گزارش: {e}")
+    usd = get_price_from_api("usd")
+    usdt = get_usdt_nobitex()
+    msg = f"💵 دلار: `{usd}` تومان\n🟢 تتر: `{usdt}` تومان\n\n@diginavasan"
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
 
 async def start(update, context):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="سلام! ربات دیجی نوسان با موفقیت فعال شد. ✅\nبرای دریافت قیمت‌ها، دستور /price را بزنید.")
-    
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="سلام! ربات فعال شد. ✅")
+
 async def price(update, context):
     await send_prices_to_chat(context, update.effective_chat.id)
 
 if __name__ == '__main__':
-    app = (
-        ApplicationBuilder()
-        .token(TOKEN)
-        .base_url(f"{PROXY_URL}/bot")
-        .base_file_url(f"{PROXY_URL}/file/bot")
-        .build()
-    )
-    
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('price', price))
     
-    print("ربات با Webhook روشن شد...")
-    
-    # اجرای Webhook (مناسب برای Render)
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,

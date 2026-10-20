@@ -11,6 +11,10 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TOKEN = os.environ.get("BOT_TOKEN")
 PROXY_URL = "https://square-wood-1983.mostafatavakoli544.workers.dev"
 
+# تنظیمات Webhook برای Render
+PORT = int(os.environ.get("PORT", 10000))
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
 # تابع جدید برای گرفتن قیمت از priceto.day
 def get_price_from_api(symbol):
     try:
@@ -96,5 +100,12 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('price', price))
     
-    print("ربات روشن شد...")
-    app.run_polling()
+    print("ربات با Webhook روشن شد...")
+    
+    # اجرای Webhook (مناسب برای Render)
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"{RENDER_URL}/{TOKEN}"
+    )

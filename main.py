@@ -7,7 +7,7 @@ import socketserver
 import pytz
 import jdatetime
 from hijri_converter import convert
-from datetime import datetime
+from datetime import datetime, time
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -95,7 +95,7 @@ def get_nobitex_price(symbol):
 # ⚙️ پیام‌های صبح و شب
 # ==========================================
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
-    day, shamsi, hijri, greg, time, _ = get_dates_info()
+    day, shamsi, hijri, greg, t, _ = get_dates_info()
     
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
 صبح بخیر! بازار امروز آغاز شد. ☀️
@@ -104,7 +104,7 @@ async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
 🗓 شمسی: `{shamsi}`
 🌙 قمری: `{hijri}`
 📆 میلادی: `{greg}`
-⏰ ساعت: `{time}`
+⏰ ساعت: `{t}`
 
 *💰 دیجی نوسان 👇*
 @diginavasan"""
@@ -122,7 +122,7 @@ async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
 # ⚙️ پیام‌های چرخشی نرخ‌ها
 # ==========================================
 async def send_fiat_prices(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, time, _ = get_dates_info()
+    _, _, _, _, t, _ = get_dates_info()
     usd = get_nerkh_price("dollar")
     eur = get_nerkh_price("euro")
     gbp = get_nerkh_price("pound")
@@ -131,7 +131,7 @@ async def send_fiat_prices(context: ContextTypes.DEFAULT_TYPE):
     cny = get_nerkh_price("yuan")
     
     msg = f"""{TEMPLATES['fiat_title']}
-⏰ ساعت آپدیت: `{time}`
+⏰ ساعت آپدیت: `{t}`
 
 💵 دلار = `{usd}` تومان
 💶 یورو = `{eur}` تومان
@@ -143,14 +143,14 @@ async def send_fiat_prices(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_gold_prices(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, time, _ = get_dates_info()
+    _, _, _, _, t, _ = get_dates_info()
     gold18 = get_nerkh_price("gold")
     coin_emami = get_nerkh_price("emami_coin")
     coin_nim = get_nerkh_price("half_coin")
     coin_rob = get_nerkh_price("quarter_coin")
     
     msg = f"""{TEMPLATES['gold_title']}
-⏰ ساعت آپدیت: `{time}`
+⏰ ساعت آپدیت: `{t}`
 
 🌕 طلا ۱۸ عیار = `{gold18}` تومان
 🪙 سکه امامی = `{coin_emami}` تومان
@@ -160,13 +160,13 @@ async def send_gold_prices(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_crypto_prices(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, time, _ = get_dates_info()
+    _, _, _, _, t, _ = get_dates_info()
     btc = get_nobitex_price("btc")
     eth = get_nobitex_price("eth")
     usdt = get_nobitex_price("usdt")
     
     msg = f"""{TEMPLATES['crypto_title']}
-⏰ ساعت آپدیت: `{time}`
+⏰ ساعت آپدیت: `{t}`
 
 🟠 بیت‌کوین (BTC) = `{btc}` تومان
 🔷 اتریوم (ETH) = `{eth}` تومان
@@ -225,11 +225,13 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('gold', test_gold))
     app.add_handler(CommandHandler('crypto', test_crypto))
     
+    tehran_tz = pytz.timezone('Asia/Tehran')
+    
     # ۱. پیام صبح‌بخیر رأس ساعت ۸:۰۰ صبح
-    app.job_queue.run_daily(send_morning_message, time=datetime.time(8, 0, tzinfo=pytz.timezone('Asia/Tehran')))
+    app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     
     # ۲. پیام پایان بازار رأس ساعت ۸:۰۰ شب
-    app.job_queue.run_daily(send_night_message, time=datetime.time(20, 0, tzinfo=pytz.timezone('Asia/Tehran')))
+    app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
     # ۳. چرخش پیام‌ها هر ۸ دقیقه (۴۸۰ ثانیه) - فقط در ساعات کاری
     app.job_queue.run_repeating(rotate_jobs, interval=480, first=10)

@@ -16,9 +16,6 @@ TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 CHANNEL_ID = "@diginavasan"
 
-# ==========================================
-# ⚙️ تنظیمات و متن‌های قابل ویرایش
-# ==========================================
 TEMPLATES = {
     "fiat_title": "💱 **قیمت لحظه‌ای ارزها**",
     "gold_title": "🌕 **قیمت لحظه‌ای طلا و سکه**",
@@ -26,9 +23,6 @@ TEMPLATES = {
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
 
-# ==========================================
-# ⚙️ توابع پایه (وب‌سرور و زمان)
-# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
@@ -39,43 +33,30 @@ def get_dates_info():
     tehran_tz = pytz.timezone('Asia/Tehran')
     now = datetime.now(tehran_tz)
     
-    # تاریخ شمسی
     shamsi_date = jdatetime.date.fromgregorian(date=now.date()).strftime('%Y/%m/%d')
-    
-    # تاریخ قمری
     hijri_date = convert.Gregorian(now.year, now.month, now.day).to_hijri()
     hijri_str = f"{hijri_date.year}/{hijri_date.month}/{hijri_date.day}"
-    
-    # تاریخ میلادی
     gregorian_str = now.strftime('%Y/%m/%d')
-    
-    # روز هفته
     days = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
     day_name = days[now.weekday()]
-    
     time_str = now.strftime('%H:%M')
     
     return day_name, shamsi_date, hijri_str, gregorian_str, time_str, now.hour
 
 def is_working_hours():
     _, _, _, _, _, hour = get_dates_info()
-    return 8 <= hour < 20  # فقط بین ۸ صبح تا ۸ شب
+    return 8 <= hour < 20
 
-# ==========================================
-# ⚙️ توابع گرفتن قیمت
-# ==========================================
-def get_nerkh_price(key):
+# --- گرفتن کل دیتا یکجا (برای سرعت بالاتر) ---
+def fetch_all_rates():
     try:
         url = "https://nerkh.jahankhahan.shop/data/live.json"
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
-            data = response.json()
-            price = data['rates'].get(key)
-            if price:
-                return f"{price:,.0f}"
-        return "نامشخص"
+            return response.json().get('rates', {})
+        return {}
     except Exception:
-        return "خطا"
+        return {}
 
 def get_nobitex_price(symbol):
     try:
@@ -91,12 +72,8 @@ def get_nobitex_price(symbol):
     except Exception:
         return "خطا"
 
-# ==========================================
-# ⚙️ پیام‌های صبح و شب
-# ==========================================
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     day, shamsi, hijri, greg, t, _ = get_dates_info()
-    
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
 صبح بخیر! بازار امروز آغاز شد. ☀️
 
@@ -118,50 +95,46 @@ async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
 @diginavasan"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-# ==========================================
-# ⚙️ پیام‌های چرخشی نرخ‌ها
-# ==========================================
 async def send_fiat_prices(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
-    usd = get_nerkh_price("dollar")
-    eur = get_nerkh_price("euro")
-    gbp = get_nerkh_price("pound")
-    aed = get_nerkh_price("dirham")
-    try_price = get_nerkh_price("lira")
-    cny = get_nerkh_price("yuan")
+    r = fetch_all_rates()
     
     msg = f"""{TEMPLATES['fiat_title']}
 ⏰ ساعت آپدیت: `{t}`
 
-💵 دلار = `{usd}` تومان
-💶 یورو = `{eur}` تومان
-💷 پوند = `{gbp}` تومان
-🇦🇪 درهم = `{aed}` تومان
-🇹🇷 لیر = `{try_price}` تومان
-🇨🇳 یوان = `{cny}` تومان
+💵 دلار = `{r.get('dollar', 0):,.0f}` تومان
+💶 یورو = `{r.get('euro', 0):,.0f}` تومان
+💷 پوند = `{r.get('pound', 0):,.0f}` تومان
+🇦🇪 درهم = `{r.get('aed', 0):,.0f}` تومان
+🇹🇷 لیر = `{r.get('lira', 0):,.0f}` تومان
+🇨🇳 یوان = `{r.get('yuan', 0):,.0f}` تومان
+🇨🇦 دلار کانادا = `{r.get('cad', 0):,.0f}` تومان
 {TEMPLATES['footer']}"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_gold_prices(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
-    gold18 = get_nerkh_price("gold")
-    coin_emami = get_nerkh_price("emami_coin")
-    coin_nim = get_nerkh_price("half_coin")
-    coin_rob = get_nerkh_price("quarter_coin")
+    r = fetch_all_rates()
     
     msg = f"""{TEMPLATES['gold_title']}
 ⏰ ساعت آپدیت: `{t}`
 
-🌕 طلا ۱۸ عیار = `{gold18}` تومان
-🪙 سکه امامی = `{coin_emami}` تومان
-🪙 نیم سکه = `{coin_nim}` تومان
-🪙 ربع سکه = `{coin_rob}` تومان
+🌕 طلا ۱۸ عیار = `{r.get('gold', 0):,.0f}` تومان
+🌕 طلا ۲۴ عیار = `{r.get('gold24', 0):,.0f}` تومان
+⚖️ مثقال طلا = `{r.get('mesghal', 0):,.0f}` تومان
+🪙 سکه امامی = `{r.get('coin', 0):,.0f}` تومان
+🪙 سکه بهار = `{r.get('bahar', 0):,.0f}` تومان
+🪙 نیم سکه = `{r.get('half', 0):,.0f}` تومان
+🪙 ربع سکه = `{r.get('quarter', 0):,.0f}` تومان
 {TEMPLATES['footer']}"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_crypto_prices(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
-    btc = get_nobitex_price("btc")
+    r = fetch_all_rates()
+    
+    # برای بیت‌کوین از دیتای خود API استفاده می‌کنیم، برای اتریوم و تتر از نوبیتکس
+    btc = f"{r.get('bitcoin', 0):,.0f}"
     eth = get_nobitex_price("eth")
     usdt = get_nobitex_price("usdt")
     
@@ -174,27 +147,17 @@ async def send_crypto_prices(context: ContextTypes.DEFAULT_TYPE):
 {TEMPLATES['footer']}"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-# ==========================================
-# ⚙️ سیستم چرخش
-# ==========================================
 _rotation_index = 0
 
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours():
         return
-        
     global _rotation_index
     jobs = [send_fiat_prices, send_gold_prices, send_crypto_prices]
-    
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
-    
-    print(f"ارسال پیام چرخشی شماره {_rotation_index % len(jobs) + 1}...")
     await current_job(context)
 
-# ==========================================
-# ⚙️ دستورات تست
-# ==========================================
 async def start(update, context):
     await context.bot.send_message(chat_id=update.effective_chat.id, text="ربات مجهز به سیستم زمان‌بندی شد. ✅")
 
@@ -227,14 +190,9 @@ if __name__ == '__main__':
     
     tehran_tz = pytz.timezone('Asia/Tehran')
     
-    # ۱. پیام صبح‌بخیر رأس ساعت ۸:۰۰ صبح
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
-    
-    # ۲. پیام پایان بازار رأس ساعت ۸:۰۰ شب
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
-    
-    # ۳. چرخش پیام‌ها هر ۸ دقیقه (۴۸۰ ثانیه) - فقط در ساعات کاری
     app.job_queue.run_repeating(rotate_jobs, interval=480, first=10)
     
-    print("ربات روشن شد. سیستم زمان‌بندی (صبح، شب، چرخش) فعال است...")
+    print("ربات روشن شد. سیستم زمان‌بندی فعال است...")
     app.run_polling()

@@ -8,7 +8,7 @@ import pytz
 import jdatetime
 from hijri_converter import convert
 from datetime import datetime, time
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
     ConversationHandler, MessageHandler, filters
@@ -77,20 +77,18 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
-def get_nobitex_price(symbol):
-    try:
-        # استفاده از هدر مناسب برای جلوگیری از بلاک شدن
-        headers = {'User-Agent': 'TraderBot/DigiNavasan-1.0'}
-        url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={symbol}&dstCurrency=rls"
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            key = f"{symbol}-rls"
-            if 'stats' in data and key in data['stats']:
-                # قیمت به ریال برمی‌گردد، تقسیم بر ۱۰ برای تومان
-                price_toman = int(float(data['stats'][key]['latest']) / 10)
-                return f"{price_toman:,.0f}"
+# تابع جدید برای گرفتن قیمت کریپتو از CoinGecko (بدون بلاک شدن)
+def get_crypto_price_toman(coin_id, usd_price_float):
+    if usd_price_float <= 0:
         return "نامشخص"
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            usd_val = res.json()[coin_id]['usd']
+            return f"{int(usd_val * usd_price_float):,.0f}"
+        return "خطا"
     except Exception:
         return "خطا"
 
@@ -120,24 +118,31 @@ def generate_fiat_msg():
 def generate_gold_msg():
     _, _, _, _, t, _ = get_dates_info()
     gold18 = get_nerkh_price_safe(["gold", "gold_18k"])
-    coin_emami = get_nerkh_price_safe(["emami", "sekke_emami", "emami_coin"])
-    coin_nim = get_nerkh_price_safe(["nim", "half_coin"])
-    coin_rob = get_nerkh_price_safe(["rob", "quarter_coin"])
+    # اضافه کردن اسم‌های مختلف برای سکه‌ها
+    coin_emami = get_nerkh_price_safe(["sekke_emami", "emami", "emami_coin", "coin_emami", "sekkeh"])
+    coin_bahar = get_nerkh_price_safe(["sekke_bahar", "bahar", "coin_bahar"])
+    coin_nim = get_nerkh_price_safe(["sekke_nim", "nim", "half_coin", "coin_nim"])
+    coin_rob = get_nerkh_price_safe(["sekke_rob", "rob", "quarter_coin", "coin_rob"])
     
     return f"""{TEMPLATES['gold_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
 
 🌕 طلا ۱۸ عیار = \u200e`{gold18}` تومان
 🪙 سکه امامی = \u200e`{coin_emami}` تومان
+🪙 سکه بهار = \u200e`{coin_bahar}` تومان
 🪙 نیم سکه = \u200e`{coin_nim}` تومان
 🪙 ربع سکه = \u200e`{coin_rob}` تومان
 {TEMPLATES['footer']}"""
 
 def generate_crypto_msg():
     _, _, _, _, t, _ = get_dates_info()
-    btc = get_nobitex_price("btc")
-    eth = get_nobitex_price("eth")
-    usdt = get_nobitex_price("usdt")
+    # گرفتن قیمت دلار برای تبدیل
+    usd_str = get_nerkh_price_safe(["dollar", "usd"])
+    usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
+    
+    btc = get_crypto_price_toman("bitcoin", usd_float)
+    eth = get_crypto_price_toman("ethereum", usd_float)
+    usdt = get_crypto_price_toman("tether", usd_float)
     
     return f"""{TEMPLATES['crypto_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
@@ -193,10 +198,9 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==========================================
-# ⚙️ منوی اصلی (کیبورد پایین صفحه - همیشه در دسترس)
+# ⚙️ منوی اصلی (کیبورد پایین صفحه)
 # ==========================================
 def get_main_menu():
-    # استفاده از ReplyKeyboardMarkup برای منوی پایین صفحه
     keyboard = [
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال")],
@@ -204,7 +208,6 @@ def get_main_menu():
         [KeyboardButton("🚗 قیمت خودرو (به‌زودی)")],
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
-    # resize_keyboard برای اندازه بهتر و is_persistent برای همیشه موندن
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,7 +242,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
 # ==========================================
-# ⚙️ مدیریت پیام‌های متنی منو (ReplyKeyboard)
+# ⚙️ مدیریت پیام‌های متنی منو
 # ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -271,7 +274,7 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==========================================
-# 🧮 ماشین‌حساب طلا (با واحد تومان)
+# 🧮 ماشین‌حساب طلا
 # ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 
@@ -310,7 +313,6 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        # قیمت به تومان وارد می‌شود
         context.user_data['price'] = float(update.message.text.replace(',', ''))
         await update.message.reply_text("چند گرم طلا می‌خواهید بخرید؟ (مثلاً 5)")
         return WEIGHT
@@ -355,7 +357,6 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
         profit_pct = context.user_data['profit']
         tax_pct = context.user_data['tax']
         
-        # محاسبات با تومان
         base_price = price * weight
         ajrat_amount = base_price * (ajrat_pct / 100)
         profit_amount = (base_price + ajrat_amount) * (profit_pct / 100)
@@ -415,7 +416,6 @@ if __name__ == '__main__':
     app.add_handler(gold_conv_handler)
     app.add_handler(CommandHandler('start', start))
     
-    # هندلر برای دکمه‌های منوی پایین (ReplyKeyboard)
     app.add_handler(MessageHandler(filters.Regex("^(💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🚗 قیمت خودرو \\(به‌زودی\\)|🎁 دعوت از دوستان)$"), handle_menu_text))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
@@ -423,5 +423,5 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=480, first=10)
     
-    print("ربات روشن شد. منوی پایین صفحه و محاسبات تومان فعال شد...")
+    print("ربات روشن شد. باگ سکه‌ها و کریپتو رفع شد...")
     app.run_polling()

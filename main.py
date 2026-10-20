@@ -7,25 +7,41 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# تنظیمات
 TOKEN = os.environ.get("BOT_TOKEN")
 PROXY_URL = "https://square-wood-1983.mostafatavakoli544.workers.dev"
 
-def get_tgju_price(item_name, to_toman=False):
+# تابع جدید برای گرفتن قیمت از priceto.day
+def get_price_from_api(symbol):
     try:
-        url = "https://call1.tgju.org/ajax.json"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
-        if item_name in data['current']:
-            price_str = data['current'][item_name]['p']
-            price_val = int(price_str.replace(',', ''))
-            if to_toman:
-                price_val = price_val // 10
-            return f"{price_val:,.0f}"
+        url = f"https://api.priceto.day/v1/latest/irr/{symbol}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            price = data.get('price')
+            if price:
+                return f"{price:,.0f}"
         return "نامشخص"
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching {symbol}: {e}")
         return "خطا"
 
+# تابع گرفتن قیمت تتر از نوبیتکس
+def get_usdt_nobitex():
+    try:
+        url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            price_rial = float(data['stats']['usdt-rls']['latest'])
+            price_toman = int(price_rial / 10)
+            return f"{price_toman:,.0f}"
+        return "نامشخص"
+    except Exception as e:
+        print(f"Error fetching Nobitex USDT: {e}")
+        return "خطا"
+
+# تابع گرفتن انس جهانی
 def get_global_ounce():
     try:
         res = requests.get("https://api.gold-api.com/price/XAU", timeout=10)
@@ -36,96 +52,37 @@ def get_global_ounce():
     except Exception:
         return "خطا", "خطا"
 
-def is_working_hours():
-    tehran_tz = pytz.timezone('Asia/Tehran')
-    now = datetime.now(tehran_tz)
-    return 8 <= now.hour < 20
-
+# تابع ارسال پیام قیمت‌ها
 async def send_prices_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id):
     try:
-        usd = get_tgju_price("price_dollar_rl", to_toman=True)
-        eur = get_tgju_price("price_eur", to_toman=True)
-        gbp = get_tgju_price("price_gbp", to_toman=True)
-        aed = get_tgju_price("price_aed", to_toman=True)
-        try_price = get_tgju_price("price_try", to_toman=True)
-        gold18 = get_tgju_price("geram18", to_toman=True)
-        gold24 = get_tgju_price("geram24", to_toman=True)
-        coin_emami = get_tgju_price("sekee")
-        coin_bahar = get_tgju_price("sekeb")
-        coin_nim = get_tgju_price("nim")
-        coin_rob = get_tgju_price("rob")
+        usd = get_price_from_api("usd")
+        eur = get_price_from_api("eur")
+        gbp = get_price_from_api("gbp")
+        usdt = get_usdt_nobitex()
         ounce_gold, ounce_silver = get_global_ounce()
 
-        msg = f"""💰 **قیمت لحظه‌ای دلار، طلا و سکه**
+        msg = f"""💰 **قیمت لحظه‌ای (تست نهایی)**
 
 💵 قیمت دلار = `{usd}` تومان
 💵 قیمت یورو = `{eur}` تومان
-💵 قیمت پوند انگلستان = `{gbp}` تومان
-💵 قیمت لیر ترکیه = `{try_price}` تومان
-💵 قیمت درهم امارات = `{aed}` تومان
+💵 قیمت پوند = `{gbp}` تومان
+
+🟢 قیمت تتر (نوبیتکس) = `{usdt}` تومان
 
 🌕 اونس جهانی طلا = `{ounce_gold}` دلار
 🪙 اونس جهانی نقره = `{ounce_silver}` دلار
-🌕 قیمت طلا ۱۸ عیار = `{gold18}` تومان
-🌕 قیمت طلا ۲۴ عیار = `{gold24}` تومان
-🌕 سکه امامی = `{coin_emami}` تومان
-🌕 سکه تمام بهار آزادی = `{coin_bahar}` تومان
-🌕 نیم سکه = `{coin_nim}` تومان
-🌕 ربع سکه = `{coin_rob}` تومان
 
 *💰 قیمت لحظه‌ای دیجی نوسان 👇*
 @diginavasan"""
         await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
     except Exception as e:
-        print(f"❌ خطا: {e}")
-
-async def send_crypto_to_chat(context: ContextTypes.DEFAULT_TYPE, chat_id):
-    try:
-        usd_price_str = get_tgju_price("price_dollar_rl", to_toman=True)
-        usd_price = int(usd_price_str.replace(',', '')) if usd_price_str not in ["خطا", "نامشخص"] else 0
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,tether,ethereum,binancecoin&vs_currencies=usd"
-        res = requests.get(url, timeout=10)
-        data = res.json()
-        btc_toman = int(data['bitcoin']['usd'] * usd_price)
-        usdt_toman = int(data['tether']['usd'] * usd_price)
-        eth_toman = int(data['ethereum']['usd'] * usd_price)
-        bnb_toman = int(data['binancecoin']['usd'] * usd_price)
-
-        msg = f"""🪙 **قیمت لحظه‌ای ارز دیجیتال**
-
-💵 دلار پایه = `{usd_price:,}` تومان
-
-🟠 بیت‌کوین (BTC) = `{btc_toman:,}` تومان
-🟢 تتر (USDT) = `{usdt_toman:,}` تومان
-🔷 اتریوم (ETH) = `{eth_toman:,}` تومان
-🟡 بایننس (BNB) = `{bnb_toman:,}` تومان
-
-*💰 قیمت لحظه‌ای دیجی نوسان 👇*
-@diginavasan"""
-        await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-    except Exception as e:
-        print(f"❌ خطا: {e}")
-
-async def auto_report(context: ContextTypes.DEFAULT_TYPE):
-    if not is_working_hours(): return
-    await send_prices_to_chat(context, "@diginavasan")
-
-async def auto_crypto(context: ContextTypes.DEFAULT_TYPE):
-    if not is_working_hours(): return
-    await send_crypto_to_chat(context, "@diginavasan")
-
-_rotation_index = 0
-
-async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
-    global _rotation_index
-    if not is_working_hours(): return
-    jobs = [auto_report, auto_crypto]
-    current = jobs[_rotation_index % len(jobs)]
-    _rotation_index += 1
-    await current(context)
+        print(f"❌ خطا در ساخت گزارش: {e}")
 
 async def start(update, context):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="سلام! ربات دیجی نوسان با موفقیت فعال شد. ✅")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="سلام! ربات دیجی نوسان با موفقیت فعال شد. ✅\nبرای دریافت قیمت‌ها، دستور /price را بزنید.")
+    
+async def price(update, context):
+    await send_prices_to_chat(context, update.effective_chat.id)
 
 if __name__ == '__main__':
     app = (
@@ -137,7 +94,7 @@ if __name__ == '__main__':
     )
     
     app.add_handler(CommandHandler('start', start))
-    app.job_queue.run_repeating(rotate_jobs, interval=300, first=10)
+    app.add_handler(CommandHandler('price', price))
     
-    # اجرای ربات با روش Polling (مناسب برای Render)
+    print("ربات روشن شد...")
     app.run_polling()

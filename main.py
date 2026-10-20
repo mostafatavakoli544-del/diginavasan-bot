@@ -8,7 +8,11 @@ import pytz
 import jdatetime
 from hijri_converter import convert
 from datetime import datetime, time
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, ContextTypes, CommandHandler, 
+    ConversationHandler, MessageHandler, filters, CallbackQueryHandler
+)
 from supabase import create_client, Client
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -16,9 +20,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 CHANNEL_ID = "@diginavasan"
-ADMIN_ID = 718840144 
+ADMIN_ID = 718840144
 
-# اتصال به دیتابیس Supabase
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -30,6 +33,9 @@ TEMPLATES = {
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
 
+# ==========================================
+# ⚙️ توابع پایه
+# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
@@ -59,10 +65,10 @@ def get_nerkh_price(key):
             data = response.json()
             price = data['rates'].get(key)
             if price:
-                return f"{price:,.0f}"
-        return "نامشخص"
+                return int(price)
+        return 0
     except Exception:
-        return "خطا"
+        return 0
 
 def get_nobitex_price(symbol):
     try:
@@ -78,7 +84,68 @@ def get_nobitex_price(symbol):
     except Exception:
         return "خطا"
 
-# --- پیام‌های کانال ---
+# ==========================================
+# ⚙️ ساخت پیام‌ها
+# ==========================================
+def generate_fiat_msg():
+    _, _, _, _, t, _ = get_dates_info()
+    usd = get_nerkh_price("dollar")
+    eur = get_nerkh_price("euro")
+    gbp = get_nerkh_price("pound")
+    aed = get_nerkh_price("dirham")
+    try_price = get_nerkh_price("lira")
+    cny = get_nerkh_price("yuan")
+    return f"""{TEMPLATES['fiat_title']}
+⏰ ساعت آپدیت: `{t}`
+
+💵 دلار = `{usd:,.0f}` تومان
+💶 یورو = `{eur:,.0f}` تومان
+💷 پوند = `{gbp:,.0f}` تومان
+🇦🇪 درهم = `{aed:,.0f}` تومان
+🇹🇷 لیر = `{try_price:,.0f}` تومان
+🇨🇳 یوان = `{cny:,.0f}` تومان
+{TEMPLATES['footer']}"""
+
+def generate_gold_msg():
+    _, _, _, _, t, _ = get_dates_info()
+    gold18 = get_nerkh_price("gold")
+    coin_emami = get_nerkh_price("emami_coin")
+    coin_nim = get_nerkh_price("half_coin")
+    coin_rob = get_nerkh_price("quarter_coin")
+    return f"""{TEMPLATES['gold_title']}
+⏰ ساعت آپدیت: `{t}`
+
+🌕 طلا ۱۸ عیار = `{gold18:,.0f}` تومان
+🪙 سکه امامی = `{coin_emami:,.0f}` تومان
+🪙 نیم سکه = `{coin_nim:,.0f}` تومان
+🪙 ربع سکه = `{coin_rob:,.0f}` تومان
+{TEMPLATES['footer']}"""
+
+def generate_crypto_msg():
+    _, _, _, _, t, _ = get_dates_info()
+    btc = get_nobitex_price("btc")
+    eth = get_nobitex_price("eth")
+    usdt = get_nobitex_price("usdt")
+    return f"""{TEMPLATES['crypto_title']}
+⏰ ساعت آپدیت: `{t}`
+
+🟠 بیت‌کوین (BTC) = `{btc}` تومان
+🔷 اتریوم (ETH) = `{eth}` تومان
+🟢 تتر (USDT) = `{usdt}` تومان
+{TEMPLATES['footer']}"""
+
+# ==========================================
+# ⚙️ ارسال خودکار به کانال
+# ==========================================
+async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_fiat_msg(), parse_mode='Markdown')
+
+async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_gold_msg(), parse_mode='Markdown')
+
+async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_crypto_msg(), parse_mode='Markdown')
+
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     day, shamsi, hijri, greg, t, _ = get_dates_info()
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
@@ -102,147 +169,257 @@ async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
 @diginavasan"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-async def send_fiat_prices(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, t, _ = get_dates_info()
-    usd = get_nerkh_price("dollar")
-    eur = get_nerkh_price("euro")
-    gbp = get_nerkh_price("pound")
-    aed = get_nerkh_price("dirham")
-    try_price = get_nerkh_price("lira")
-    cny = get_nerkh_price("yuan")
-    
-    msg = f"""{TEMPLATES['fiat_title']}
-⏰ ساعت آپدیت: `{t}`
-
-💵 دلار = `{usd}` تومان
-💶 یورو = `{eur}` تومان
-💷 پوند = `{gbp}` تومان
-🇦🇪 درهم = `{aed}` تومان
-🇹🇷 لیر = `{try_price}` تومان
-🇨🇳 یوان = `{cny}` تومان
-{TEMPLATES['footer']}"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
-
-async def send_gold_prices(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, t, _ = get_dates_info()
-    gold18 = get_nerkh_price("gold")
-    coin_emami = get_nerkh_price("emami_coin")
-    coin_nim = get_nerkh_price("half_coin")
-    coin_rob = get_nerkh_price("quarter_coin")
-    
-    msg = f"""{TEMPLATES['gold_title']}
-⏰ ساعت آپدیت: `{t}`
-
-🌕 طلا ۱۸ عیار = `{gold18}` تومان
-🪙 سکه امامی = `{coin_emami}` تومان
-🪙 نیم سکه = `{coin_nim}` تومان
-🪙 ربع سکه = `{coin_rob}` تومان
-{TEMPLATES['footer']}"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
-
-async def send_crypto_prices(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, t, _ = get_dates_info()
-    btc = get_nobitex_price("btc")
-    eth = get_nobitex_price("eth")
-    usdt = get_nobitex_price("usdt")
-    
-    msg = f"""{TEMPLATES['crypto_title']}
-⏰ ساعت آپدیت: `{t}`
-
-🟠 بیت‌کوین (BTC) = `{btc}` تومان
-🔷 اتریوم (ETH) = `{eth}` تومان
-🟢 تتر (USDT) = `{usdt}` تومان
-{TEMPLATES['footer']}"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
-
 _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
     global _rotation_index
-    jobs = [send_fiat_prices, send_gold_prices, send_crypto_prices]
+    jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
     await current_job(context)
 
+
 # ==========================================
-# سیستم دعوت از دوستان
+# ⚙️ منوی اصلی (شیشه‌ای)
 # ==========================================
-async def start(update, context):
+def get_main_menu():
+    keyboard = [
+        [InlineKeyboardButton("💱 قیمت ارزها", callback_data="menu_fiat"),
+         InlineKeyboardButton("🌕 قیمت طلا و سکه", callback_data="menu_gold")],
+        [InlineKeyboardButton("🪙 قیمت ارز دیجیتال", callback_data="menu_crypto")],
+        [InlineKeyboardButton("🧮 ماشین‌حساب طلا", callback_data="menu_gold_calc")],
+        [InlineKeyboardButton("🚗 قیمت خودرو (به‌زودی)", callback_data="menu_car_prices")],
+        [InlineKeyboardButton("🎁 دعوت از دوستان", callback_data="menu_invite")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     try:
-        # بررسی اینکه آیا کاربر قبلاً ثبت‌نام کرده یا نه
         response = supabase.table('users').select('*').eq('user_id', user_id).execute()
         
         if not response.data:
             invited_by = None
-            # چک کردن اینکه آیا با لینک دعوت اومده یا نه
             if context.args:
                 try:
                     invited_by = int(context.args[0])
                 except ValueError:
                     pass
             
-            # ثبت کاربر جدید در دیتابیس
             supabase.table('users').insert({"user_id": user_id, "invited_by": invited_by}).execute()
             
-            # اگه با لینک کسی اومده بود، تعداد دعوت‌های اون شخص رو زیاد کن
             if invited_by:
                 inviter_res = supabase.table('users').select('invite_count').eq('user_id', invited_by).execute()
                 if inviter_res.data:
                     new_count = inviter_res.data[0]['invite_count'] + 1
                     supabase.table('users').update({"invite_count": new_count}).eq('user_id', invited_by).execute()
                     try:
-                        # اطلاع دادن به شخص دعوت‌کننده
                         await context.bot.send_message(chat_id=invited_by, text=f"🎉 یک کاربر جدید با لینک شما به ربات پیوست!\nتعداد کل دعوت‌های شما: {new_count}")
                     except:
                         pass
     except Exception as e:
         print(f"DB Error: {e}")
 
-    # ساخت لینک اختصاصی برای کاربر
-    invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+    welcome_msg = "سلام! به ربات دیجی نوسان خوش آمدید. ✅\n\n👇 **لطفاً از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
+    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
+
+# ==========================================
+# ⚙️ مدیریت کلیک روی دکمه‌های منو
+# ==========================================
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-    welcome_msg = f"""سلام! به ربات دیجی نوسان خوش آمدید. ✅
-    
+    chat_id = query.message.chat_id
+    user_id = query.from_user.id
+
+    if query.data == "menu_fiat":
+        await context.bot.send_message(chat_id=chat_id, text=generate_fiat_msg(), parse_mode='Markdown')
+    elif query.data == "menu_gold":
+        await context.bot.send_message(chat_id=chat_id, text=generate_gold_msg(), parse_mode='Markdown')
+    elif query.data == "menu_crypto":
+        await context.bot.send_message(chat_id=chat_id, text=generate_crypto_msg(), parse_mode='Markdown')
+    elif query.data == "menu_car_prices":
+        await context.bot.send_message(chat_id=chat_id, text="🚗 قیمت خودرو به زودی در این ربات فعال خواهد شد. منتظر بمانید!")
+    elif query.data == "menu_gold_calc":
+        await gold_calc_start(update, context)
+        
+    elif query.data == "menu_invite":
+        invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+        invite_text = f"""🎁 **دعوت از دوستان**
+
 🔗 **لینک دعوت اختصاصی شما:**
 `{invite_link}`
 
-🎁 با ارسال این لینک به دوستانتان و دعوت آن‌ها، می‌توانید امتیاز جمع کنید و از امکانات ویژه ربات (مثل قیمت خودرو، ماشین‌حساب طلا و...) به صورت کاملاً رایگان استفاده کنید.
+با ارسال این لینک به دوستانتان و دعوت آن‌ها، می‌توانید امتیاز جمع کنید و از امکانات ویژه ربات (مثل ماشین‌حساب طلا) به صورت کاملاً رایگان استفاده کنید.
 
 📢 **به کانال ما هم بپیوندید:**
-@diginavasan
-*(در کانال ما قیمت‌های لحظه‌ای ارز، طلا، سکه و ارزهای دیجیتال به صورت خودکار و منظم به‌روزرسانی می‌شود. با عضویت در کانال، همیشه از آخرین نرخ‌های بازار باخبر شوید).*"""
-    
-    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown')
+@diginavasan"""
+        
+        # دکمه بازگشت به منو
+        back_keyboard = [[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu_back")]]
+        await query.edit_message_text(text=invite_text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(back_keyboard))
+        
+    elif query.data == "menu_back":
+        welcome_msg = "👇 **لطفاً از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
+        await query.edit_message_text(text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
-# --- دستورات تست (فقط مدیر) ---
-async def test_fiat(update, context):
-    if update.effective_user.id != ADMIN_ID: return
-    await send_fiat_prices(context)
 
-async def test_gold(update, context):
-    if update.effective_user.id != ADMIN_ID: return
-    await send_gold_prices(context)
+# ==========================================
+# 🧮 ماشین‌حساب طلا
+# ==========================================
+PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 
-async def test_crypto(update, context):
-    if update.effective_user.id != ADMIN_ID: return
-    await send_crypto_prices(context)
+async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query:
+        user_id = update.callback_query.from_user.id
+        chat_id = update.callback_query.message.chat_id
+    else:
+        user_id = update.effective_user.id
+        chat_id = update.message.chat_id
 
+    if user_id != ADMIN_ID:
+        try:
+            res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
+            invite_count = res.data[0]['invite_count'] if res.data else 0
+            
+            if invite_count < 5:
+                invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⛔ برای استفاده از ماشین‌حساب طلا، باید حداقل ۵ نفر رو به ربات دعوت کنی.\n\n"
+                         f"تعداد دعوت‌های فعلی شما: {invite_count} نفر\n\n"
+                         f"🔗 لینک دعوت شما:\n`{invite_link}`",
+                    parse_mode='Markdown'
+                )
+                return ConversationHandler.END
+        except Exception as e:
+            await context.bot.send_message(chat_id=chat_id, text="خطا در بررسی دیتابیس. لطفاً بعداً تلاش کنید.")
+            return ConversationHandler.END
+
+    gold_price = get_nerkh_price("gold")
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"🧮 **ماشین‌حساب طلا**\n\n"
+             f"لطفاً قیمت هر گرم طلای ۱۸ عیار را به تومان وارد کنید:\n"
+             f"(راهنما: قیمت لحظه‌ای بازار `{gold_price:,.0f}` تومان است)",
+        parse_mode='Markdown'
+    )
+    return PRICE
+
+async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data['price'] = float(update.message.text.replace(',', ''))
+        await update.message.reply_text("چند گرم طلا می‌خواهید بخرید؟ (مثلاً 5)")
+        return WEIGHT
+    except ValueError:
+        await update.message.reply_text("لطفاً فقط عدد وارد کنید. قیمت را دوباره بزنید:")
+        return PRICE
+
+async def get_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data['weight'] = float(update.message.text.replace(',', ''))
+        await update.message.reply_text("درصد اجرت ساخت چقدر است؟ (اگر بدون اجرت است 0 وارد کنید)")
+        return AJRAT
+    except ValueError:
+        await update.message.reply_text("لطفاً فقط عدد وارد کنید. وزن را دوباره بزنید:")
+        return WEIGHT
+
+async def get_ajrat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data['ajrat'] = float(update.message.text.replace(',', ''))
+        await update.message.reply_text("درصد سود فروشنده چقدر است؟ (معمولاً 7)")
+        return PROFIT
+    except ValueError:
+        await update.message.reply_text("لطفاً فقط عدد وارد کنید. درصد اجرت را دوباره بزنید:")
+        return AJRAT
+
+async def get_profit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data['profit'] = float(update.message.text.replace(',', ''))
+        await update.message.reply_text("درصد مالیات بر ارزش افزوده چقدر است؟ (اگر معاف است 0 وارد کنید، معمولاً 9)")
+        return TAX
+    except ValueError:
+        await update.message.reply_text("لطفاً فقط عدد وارد کنید. درصد سود را دوباره بزنید:")
+        return PROFIT
+
+async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        context.user_data['tax'] = float(update.message.text.replace(',', ''))
+        
+        price = context.user_data['price']
+        weight = context.user_data['weight']
+        ajrat_pct = context.user_data['ajrat']
+        profit_pct = context.user_data['profit']
+        tax_pct = context.user_data['tax']
+        
+        base_price = price * weight
+        ajrat_amount = base_price * (ajrat_pct / 100)
+        profit_amount = (base_price + ajrat_amount) * (profit_pct / 100)
+        tax_amount = (ajrat_amount + profit_amount) * (tax_pct / 100)
+        
+        final_price = base_price + ajrat_amount + profit_amount + tax_amount
+        price_per_gram = final_price / weight if weight > 0 else 0
+        
+        result_msg = f"""✅ **فاکتور محاسبه طلا**
+
+⚖️ وزن: `{weight}` گرم
+💰 قیمت پایه هر گرم: `{price:,.0f}` تومان
+💵 قیمت پایه کل: `{base_price:,.0f}` تومان
+
+🛠 اجرت ساخت ({ajrat_pct}%): `{ajrat_amount:,.0f}` تومان
+📈 سود فروشنده ({profit_pct}%): `{profit_amount:,.0f}` تومان
+🧾 مالیات ({tax_pct}%): `{tax_amount:,.0f}` تومان
+
+➖➖➖➖➖➖➖➖
+💳 **قیمت نهایی: `{final_price:,.0f}` تومان**
+⚖️ **قیمت نهایی هر گرم: `{price_per_gram:,.0f}` تومان**
+
+*💰 دیجی نوسان 👇*
+@diginavasan"""
+        await update.message.reply_text(result_msg, parse_mode='Markdown', reply_markup=get_main_menu())
+        return ConversationHandler.END
+    except ValueError:
+        await update.message.reply_text("لطفاً فقط عدد وارد کنید. درصد مالیات را دوباره بزنید:")
+        return TAX
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ماشین‌حساب لغو شد.", reply_markup=get_main_menu())
+    return ConversationHandler.END
+
+
+# ==========================================
+# ⚙️ اجرای ربات
+# ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
     app = ApplicationBuilder().token(TOKEN).build()
     
+    gold_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler('gold_calc', gold_calc_start),
+            CallbackQueryHandler(gold_calc_start, pattern='^menu_gold_calc$')
+        ],
+        states={
+            PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)],
+            WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)],
+            AJRAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ajrat)],
+            PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_profit)],
+            TAX: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tax)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+    
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('fiat', test_fiat))
-    app.add_handler(CommandHandler('gold', test_gold))
-    app.add_handler(CommandHandler('crypto', test_crypto))
+    app.add_handler(CallbackQueryHandler(menu_callback))
+    app.add_handler(gold_conv_handler)
     
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=480, first=10)
     
-    print("ربات روشن شد. سیستم دعوت متصل به دیتابیس فعال است...")
+    print("ربات روشن شد. منوی دعوت از دوستان اضافه شد...")
     app.run_polling()

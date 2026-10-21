@@ -8,7 +8,7 @@ import pytz
 import jdatetime
 from hijri_converter import convert
 from datetime import datetime, time
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
     ConversationHandler, MessageHandler, filters
@@ -78,7 +78,6 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
-# تابع قوی برای کریپتو (CoinGecko -> CoinPaprika)
 def get_crypto_prices_toman(usd_price_float):
     if usd_price_float <= 0:
         return "نامشخص", "نامشخص", "نامشخص"
@@ -119,7 +118,6 @@ def get_crypto_prices_toman(usd_price_float):
 
     return "خطا", "خطا", "خطا"
 
-# تابع دریافت شاخص‌های بورس از TSETMC
 def get_stock_indices():
     try:
         url = "https://cdn.tsetmc.com/api/Index/GetIndexB1LastAll/SelectedIndexes/1"
@@ -145,9 +143,9 @@ def generate_fiat_msg():
     usd = get_nerkh_price_safe(["dollar", "usd"])
     eur = get_nerkh_price_safe(["euro", "eur"])
     gbp = get_nerkh_price_safe(["pound", "gbp"])
-    aed = get_nerkh_price_safe(["dirham", "aed"])
-    try_price = get_nerkh_price_safe(["lira", "try"])
-    cny = get_nerkh_price_safe(["yuan", "cny"])
+    aed = get_nerkh_price_safe(["aed"])
+    try_price = get_nerkh_price_safe(["lira"])
+    cny = get_nerkh_price_safe(["yuan"])
     
     return f"""{TEMPLATES['fiat_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
@@ -162,11 +160,11 @@ def generate_fiat_msg():
 
 def generate_gold_msg():
     _, _, _, _, t, _ = get_dates_info()
-    gold18 = get_nerkh_price_safe(["gold", "gold_18k"])
-    coin_emami = get_nerkh_price_safe(["sekke_emami", "emami", "emami_coin", "coin_emami", "sekkeh"])
-    coin_bahar = get_nerkh_price_safe(["sekke_bahar", "bahar", "coin_bahar"])
-    coin_nim = get_nerkh_price_safe(["sekke_nim", "nim", "half_coin", "coin_nim"])
-    coin_rob = get_nerkh_price_safe(["sekke_rob", "rob", "quarter_coin", "coin_rob"])
+    gold18 = get_nerkh_price_safe(["gold"])
+    coin_emami = get_nerkh_price_safe(["coin"])
+    coin_bahar = get_nerkh_price_safe(["bahar"])
+    coin_nim = get_nerkh_price_safe(["half"])
+    coin_rob = get_nerkh_price_safe(["quarter"])
     
     return f"""{TEMPLATES['gold_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
@@ -202,7 +200,6 @@ def generate_stock_msg():
 ⏰ ساعت آپدیت: \u200e`{t}`
 
 ⚠️ خطا در دریافت شاخص‌های بورس.
-(احتمالاً به دلیل محدودیت IP سرورهای خارجی)
 {TEMPLATES['footer']}"""
 
     tedpix_val, tedpix_chg = indices[0]['indexLastValue'], indices[0]['indexChange']
@@ -274,7 +271,7 @@ def get_main_menu():
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("📈 شاخص‌های بورس")],
         [KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🚗 قیمت خودرو (به‌زودی)")],
+        [KeyboardButton("🚗 قیمت خودرو (ویژه)")], # تغییر نام دکمه
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -331,37 +328,50 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=generate_crypto_msg(), parse_mode='Markdown')
     elif text == "📈 شاخص‌های بورس":
         await context.bot.send_message(chat_id=chat_id, text=generate_stock_msg(), parse_mode='Markdown')
-    elif text == "🚗 قیمت خودرو (به‌زودی)":
-        await context.bot.send_message(chat_id=chat_id, text="🚗 قیمت خودرو به زودی در این ربات فعال خواهد شد. منتظر بمانید!")
+    
+    # دکمه‌ای که قفلش فعاله (قیمت خودرو)
+    elif text == "🚗 قیمت خودرو (ویژه)":
+        try:
+            res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
+            invite_count = res.data[0].get('invite_count', 0) if res.data else 0
+            
+            if invite_count >= 5:
+                # اینجا بعدا کد قیمت خودرو رو میذاریم
+                await context.bot.send_message(chat_id=chat_id, text="🎉 تبریک! شما قفل این بخش را باز کرده‌اید. قیمت خودرو به زودی در اینجا قرار می‌گیرد.")
+            else:
+                invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🔒 **این بخش قفل است.**\n\nبرای باز کردن این امکان ویژه، باید حداقل ۵ نفر با لینک اختصاصی شما وارد ربات شوند.\n\n"
+                         f"تعداد دعوت‌های فعلی شما: {invite_count} نفر\n\n"
+                         f"🔗 لینک اختصاصی شما:\n{invite_link}",
+                    parse_mode='Markdown'
+                )
+        except Exception:
+            pass
+
     elif text == "🎁 دعوت از دوستان":
         invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
         
-        invite_count = 0
-        try:
-            res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
-            if res.data:
-                invite_count = res.data[0].get('invite_count', 0)
-        except:
-            pass
-            
-        invite_text = f"""🎁 **دعوت از دوستان**
+        share_text = f"سلام! خواستم این کانال و ربات فوق‌العاده رو بهت معرفی کنم. 📢\n\nما در کانال دیجی نوسان قیمت‌های لحظه‌ای بازار (دلار، طلا، سکه، ارز دیجیتال و بورس) رو به‌روزرسانی می‌کنیم. حتماً عضو کانال شو:\nhttps://t.me/diginavasan\n\nعلاوه بر کانال، یک ربات اختصاصی هم داریم که امکانات ویژه‌ای مثل «ماشین‌حساب طلا» رو به صورت رایگان در اختیارت می‌ذاره. می‌تونی از ربات هم استفاده کنی:\n{invite_link}"
+
+        invite_text = f"""🎁 **دعوت از دوستان به دیجی نوسان** 🌟
 
 👥 تعداد افرادی که تاکنون دعوت کرده‌اید: **{invite_count}** نفر
 
-🔗 **لینک دعوت اختصاصی شما:**
-[**@diginavasan_bot**]({invite_link})
+🤝 با ارسال پیام دعوت برای دوستانتان، می‌توانید آن‌ها را به کانال و ربات ما معرفی کنید. با دعوت ۵ نفر، قفل امکانات ویژه (مثل قیمت خودرو) باز می‌شود."""
+        
+        share_url = f"https://t.me/share/url?url={invite_link}&text={requests.utils.quote(share_text)}"
+        keyboard = [[InlineKeyboardButton("📤 ارسال متن دعوت به مخاطبین", url=share_url)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-با کلیک روی لینک بالا و ارسال آن برای دوستانتان، می‌توانید آن‌ها را به ربات دعوت کنید. با دعوت هر ۵ نفر، امکانات ویژه ربات (مثل ماشین‌حساب طلا) برای شما فعال می‌شود.
-
-📢 **به کانال ما هم بپیوندید:**
-@diginavasan"""
-        await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown')
+        await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown', reply_markup=reply_markup)
         
     elif text == "🧮 ماشین‌حساب طلا":
         await gold_calc_start(update, context)
 
 # ==========================================
-# 🧮 ماشین‌حساب طلا
+# 🧮 ماشین‌حساب طلا (کاملاً آزاد برای همه)
 # ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 
@@ -369,26 +379,8 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    if user_id != ADMIN_ID:
-        try:
-            res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
-            invite_count = res.data[0]['invite_count'] if res.data else 0
-            
-            if invite_count < 5:
-                invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"⛔ برای استفاده از ماشین‌حساب طلا، باید حداقل ۵ نفر رو به ربات دعوت کنی.\n\n"
-                         f"تعداد دعوت‌های فعلی شما: {invite_count} نفر\n\n"
-                         f"🔗 لینک دعوت شما:\n[**@diginavasan_bot**]({invite_link})",
-                    parse_mode='Markdown'
-                )
-                return ConversationHandler.END
-        except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text="خطا در بررسی دیتابیس. لطفاً بعداً تلاش کنید.")
-            return ConversationHandler.END
-
-    gold_price = get_nerkh_price_safe(["gold", "gold_18k"])
+    # قفل کاملاً برداشته شد. همه می‌تونن استفاده کنن.
+    gold_price = get_nerkh_price_safe(["gold"])
     await context.bot.send_message(
         chat_id=chat_id,
         text=f"🧮 **ماشین‌حساب طلا**\n\n"
@@ -526,14 +518,13 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('stats', admin_stats))
     
-    app.add_handler(MessageHandler(filters.Regex("^(💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|📈 شاخص‌های بورس|🚗 قیمت خودرو \\(به‌زودی\\)|🎁 دعوت از دوستان)$"), handle_menu_text))
+    app.add_handler(MessageHandler(filters.Regex("^(💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|📈 شاخص‌های بورس|🚗 قیمت خودرو \\(ویژه\\)|🎁 دعوت از دوستان)$"), handle_menu_text))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
-    # زمان‌بندی جدید: هر ۹۰۰ ثانیه (۱۵ دقیقه)
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. زمان‌بندی به ۱۵ دقیقه تغییر کرد...")
+    print("ربات روشن شد. ماشین‌حساب آزاد و قیمت خودرو قفل شد...")
     app.run_polling()

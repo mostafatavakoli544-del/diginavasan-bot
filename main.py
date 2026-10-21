@@ -300,7 +300,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
                 
-            # 🔴 استفاده از HTML به جای Markdown برای جلوگیری از خطای آندرلاین در اسم ربات
             invite_text = f"""🎁 <b>دعوت از دوستان به دیجی نوسان</b> 🌟
 
 👥 تعداد افرادی که تاکنون دعوت کرده‌اید: <b>{invite_count}</b> نفر
@@ -310,7 +309,16 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 برای دعوت دوستانتان، از دکمه زیر استفاده کنید:"""
             
-            share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
+            # ✅ متن کامل مارکتینگی و ضد فیشینگ
+            share_text = f"""سلام! خواستم این کانال و ربات فوق‌العاده رو بهت معرفی کنم. 🤝
+
+📢 کانال دیجی نوسان:
+ما در این کانال قیمت‌های لحظه‌ای بازار (دلار، طلا، سکه، ارز دیجیتال و بورس) رو به صورت خودکار و منظم به‌روزرسانی می‌کنیم. برای اینکه همیشه از نرخ‌های بازار باخبر باشی، حتماً توی کانال ما عضو شو:
+👉 https://t.me/diginavasan
+
+🤖 ربات اختصاصی دیجی نوسان:
+علاوه بر کانال، ما یک ربات هم داریم که امکانات خیلی بیشتری مثل «ماشین‌حساب طلا»، محاسبه اقساط و ده‌ها ابزار دیگه رو به صورت رایگان در اختیارت می‌ذاره. اگه دوست داشتی، می‌تونی از ربات ما هم استفاده کنی و دستور /start رو بزنی:
+👉 {invite_link}"""
             
             encoded_text = urllib.parse.quote(share_text)
             share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
@@ -318,7 +326,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # 🔴 parse_mode به HTML تغییر کرد
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=reply_markup)
         except Exception as e:
             await context.bot.send_message(chat_id=chat_id, text=f"❌ خطای فنی تلگرام: {e}")
@@ -482,5 +489,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. مشکل Markdown و آندرلاین حل شد...")
+    print("ربات روشن شد. متن دعوت مارکتینگی فعال شد...")
     app.run_polling()

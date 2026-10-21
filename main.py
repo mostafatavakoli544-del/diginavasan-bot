@@ -311,17 +311,17 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
             
-            # ✅ اصلاح نهایی: استفاده از urlencode برای جلوگیری از خرابی لینک
-            params = {"url": invite_link, "text": share_text}
-            share_url = f"https://t.me/share/url?{urllib.parse.urlencode(params)}"
+            # 🔴 روش جدید: فقط متن رو کدبندی میکنیم، به لینک اصلی دست نمیزنیم
+            encoded_text = urllib.parse.quote(share_text)
+            share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
             
             keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown', reply_markup=reply_markup)
         except Exception as e:
-            print(f"Error in invite: {e}")
-            await context.bot.send_message(chat_id=chat_id, text="خطایی در ساخت لینک دعوت رخ داد. لطفاً بعداً تلاش کنید.")
+            # اگر بازم خطا داد، دقیقا متن خطای تلگرام رو به کاربر نشون میده تا بفهمیم چرا
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ خطای فنی تلگرام: {e}")
 
 # ==========================================
 # 🧮 ماشین‌حساب طلا
@@ -482,5 +482,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. باگ لینک دعوت رفع شد...")
+    print("ربات روشن شد. سیستم دیباگ لینک دعوت فعال شد...")
     app.run_polling()

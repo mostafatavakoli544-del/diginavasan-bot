@@ -300,27 +300,27 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
                 
-            invite_text = f"""🎁 **دعوت از دوستان به دیجی نوسان** 🌟
+            # 🔴 استفاده از HTML به جای Markdown برای جلوگیری از خطای آندرلاین در اسم ربات
+            invite_text = f"""🎁 <b>دعوت از دوستان به دیجی نوسان</b> 🌟
 
-👥 تعداد افرادی که تاکنون دعوت کرده‌اید: **{invite_count}** نفر
+👥 تعداد افرادی که تاکنون دعوت کرده‌اید: <b>{invite_count}</b> نفر
 
-🔗 **لینک اختصاصی دعوت شما:**
+🔗 <b>لینک اختصاصی دعوت شما:</b>
 {invite_link}
 
 برای دعوت دوستانتان، از دکمه زیر استفاده کنید:"""
             
             share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
             
-            # 🔴 روش جدید: فقط متن رو کدبندی میکنیم، به لینک اصلی دست نمیزنیم
             encoded_text = urllib.parse.quote(share_text)
             share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
             
             keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown', reply_markup=reply_markup)
+            # 🔴 parse_mode به HTML تغییر کرد
+            await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=reply_markup)
         except Exception as e:
-            # اگر بازم خطا داد، دقیقا متن خطای تلگرام رو به کاربر نشون میده تا بفهمیم چرا
             await context.bot.send_message(chat_id=chat_id, text=f"❌ خطای فنی تلگرام: {e}")
 
 # ==========================================
@@ -482,5 +482,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم دیباگ لینک دعوت فعال شد...")
+    print("ربات روشن شد. مشکل Markdown و آندرلاین حل شد...")
     app.run_polling()

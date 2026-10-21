@@ -6,6 +6,7 @@ import http.server
 import socketserver
 import pytz
 import jdatetime
+import urllib.parse
 from hijri_converter import convert
 from datetime import datetime, time
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
@@ -218,13 +219,14 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی (کوتاه شده)
+# ⚙️ منوی اصلی (با دکمه استارت)
 # ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🎁 دعوت از دوستان")]
+        [KeyboardButton("🎁 دعوت از دوستان")],
+        [KeyboardButton("🚀 استارت / منوی اصلی")] # 👈 دکمه جدید
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
@@ -268,12 +270,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
 # ==========================================
-# ⚙️ مدیریت پیام‌های متنی (رفع باگ دعوت)
+# ⚙️ مدیریت پیام‌های متنی (شامل دکمه استارت)
 # ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+
+    # 👈 اگر کاربر دکمه استارت را زد، دقیقا مثل دستور /start عمل کن
+    if "استارت" in text or "منوی اصلی" in text:
+        await start(update, context)
+        return
 
     if "قیمت ارزها" in text:
         await context.bot.send_message(chat_id=chat_id, text=generate_fiat_msg(), parse_mode='Markdown')
@@ -300,11 +307,14 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔗 **لینک اختصاصی دعوت شما:**
 {invite_link}
 
-برای دعوت دوستانتان، می‌توانید این متن را کپی کرده یا از دکمه زیر برای ارسال مستقیم استفاده کنید."""
+برای دعوت دوستانتان، از دکمه زیر استفاده کنید:"""
         
-        # متن ساده برای جلوگیری از خطای ارسال
+        # 🔴 رفع کامل باگ لینک دعوت با استفاده از انکود کردن
         share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
-        share_url = f"https://t.me/share/url?url={invite_link}&text={share_text}"
+        
+        encoded_url = urllib.parse.quote(invite_link)
+        encoded_text = urllib.parse.quote(share_text)
+        share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
         
         keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -457,16 +467,13 @@ if __name__ == '__main__':
     app.add_handler(gold_conv_handler)
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('stats', admin_stats))
-    
-    # این بخش رو تغییر دادم که هر متنی رو بگیره تا باگ دکمه‌ها حل بشه
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
-    # زمان‌بندی: هر ۹۰۰ ثانیه (۱۵ دقیقه)
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. منو کوتاه شد و باگ دعوت رفع شد...")
+    print("ربات روشن شد. دکمه استارت اضافه شد و باگ دعوت رفع شد...")
     app.run_polling()

@@ -219,14 +219,14 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی (با دکمه استارت)
+# ⚙️ منوی اصلی (دکمه استارت در بالا و تمام عرض)
 # ==========================================
 def get_main_menu():
     keyboard = [
+        [KeyboardButton("🚀 استارت / منوی اصلی")], # 👈 دکمه استارت در بالا و تمام عرض
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🎁 دعوت از دوستان")],
-        [KeyboardButton("🚀 استارت / منوی اصلی")] # 👈 دکمه جدید
+        [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
@@ -270,14 +270,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
 # ==========================================
-# ⚙️ مدیریت پیام‌های متنی (شامل دکمه استارت)
+# ⚙️ مدیریت پیام‌های متنی
 # ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    # 👈 اگر کاربر دکمه استارت را زد، دقیقا مثل دستور /start عمل کن
     if "استارت" in text or "منوی اصلی" in text:
         await start(update, context)
         return
@@ -309,12 +308,11 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 برای دعوت دوستانتان، از دکمه زیر استفاده کنید:"""
         
-        # 🔴 رفع کامل باگ لینک دعوت با استفاده از انکود کردن
+        # 🔴 رفع کامل باگ لینک دعوت: فقط متن رو انکود میکنیم، نه کل آدرس رو
         share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
         
-        encoded_url = urllib.parse.quote(invite_link)
         encoded_text = urllib.parse.quote(share_text)
-        share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+        share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
         
         keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -341,6 +339,8 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PRICE
 
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if "استارت" in update.message.text or "منوی اصلی" in update.message.text:
+        return ConversationHandler.END
     try:
         context.user_data['price'] = float(update.message.text.replace(',', ''))
         await update.message.reply_text("چند گرم طلا می‌خواهید بخرید؟ (مثلاً 5)")
@@ -475,5 +475,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. دکمه استارت اضافه شد و باگ دعوت رفع شد...")
+    print("ربات روشن شد. دکمه استارت در بالا و باگ لینک رفع شد...")
     app.run_polling()

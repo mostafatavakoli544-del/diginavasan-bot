@@ -30,7 +30,6 @@ TEMPLATES = {
     "fiat_title": "💱 **قیمت لحظه‌ای ارزها**",
     "gold_title": "🌕 **قیمت لحظه‌ای طلا و سکه**",
     "crypto_title": "🪙 **قیمت لحظه‌ای ارز دیجیتال**",
-    "stock_title": "📈 **شاخص‌های بورس تهران**",
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
 
@@ -118,23 +117,6 @@ def get_crypto_prices_toman(usd_price_float):
 
     return "خطا", "خطا", "خطا"
 
-def get_stock_indices():
-    try:
-        url = "https://cdn.tsetmc.com/api/Index/GetIndexB1LastAll/SelectedIndexes/1"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            indices = data.get('indexB1', [])
-            if len(indices) >= 4:
-                return indices[:4]
-        return None
-    except Exception as e:
-        print(f"TSETMC error: {e}")
-        return None
-
 # ==========================================
 # ⚙️ ساخت پیام‌ها
 # ==========================================
@@ -191,31 +173,6 @@ def generate_crypto_msg():
 🟢 تتر (USDT) = \u200e`{usdt}` تومان
 {TEMPLATES['footer']}"""
 
-def generate_stock_msg():
-    _, _, _, _, t, _ = get_dates_info()
-    indices = get_stock_indices()
-    
-    if not indices or len(indices) < 4:
-        return f"""{TEMPLATES['stock_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
-
-⚠️ خطا در دریافت شاخص‌های بورس.
-{TEMPLATES['footer']}"""
-
-    tedpix_val, tedpix_chg = indices[0]['indexLastValue'], indices[0]['indexChange']
-    tedpix_eq_val, tedpix_eq_chg = indices[1]['indexLastValue'], indices[1]['indexChange']
-    price_val, price_chg = indices[2]['indexLastValue'], indices[2]['indexChange']
-    price_eq_val, price_eq_chg = indices[3]['indexLastValue'], indices[3]['indexChange']
-
-    return f"""{TEMPLATES['stock_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
-
-📊 شاخص کل = \u200e`{tedpix_val:,.0f}` ({tedpix_chg:+,.0f})
-⚖️ شاخص کل هم‌وزن = \u200e`{tedpix_eq_val:,.0f}` ({tedpix_eq_chg:+,.0f})
-💰 شاخص قیمت (وزنی) = \u200e`{price_val:,.0f}` ({price_chg:+,.0f})
-💵 شاخص قیمت هم‌وزن = \u200e`{price_eq_val:,.0f}` ({price_eq_chg:+,.0f})
-{TEMPLATES['footer']}"""
-
 # ==========================================
 # ⚙️ ارسال خودکار به کانال
 # ==========================================
@@ -227,9 +184,6 @@ async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
 
 async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_crypto_msg(), parse_mode='Markdown')
-
-async def send_stock_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_stock_msg(), parse_mode='Markdown')
 
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     day, shamsi, hijri, greg, t, _ = get_dates_info()
@@ -258,20 +212,18 @@ _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
     global _rotation_index
-    jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_stock_to_channel]
+    jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی
+# ⚙️ منوی اصلی (کوتاه شده)
 # ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
-        [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("📈 شاخص‌های بورس")],
-        [KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🚗 قیمت خودرو (ویژه)")], # تغییر نام دکمه
+        [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -315,63 +267,52 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👇 **از منوی زیر (پایین صفحه) یکی از گزینه‌ها را انتخاب کنید:**"""
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
+# ==========================================
+# ⚙️ مدیریت پیام‌های متنی (رفع باگ دعوت)
+# ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    text = update.message.text.strip()
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    if text == "💱 قیمت ارزها":
+    if "قیمت ارزها" in text:
         await context.bot.send_message(chat_id=chat_id, text=generate_fiat_msg(), parse_mode='Markdown')
-    elif text == "🌕 قیمت طلا و سکه":
+    elif "قیمت طلا و سکه" in text:
         await context.bot.send_message(chat_id=chat_id, text=generate_gold_msg(), parse_mode='Markdown')
-    elif text == "🪙 قیمت ارز دیجیتال":
+    elif "قیمت ارز دیجیتال" in text:
         await context.bot.send_message(chat_id=chat_id, text=generate_crypto_msg(), parse_mode='Markdown')
-    elif text == "📈 شاخص‌های بورس":
-        await context.bot.send_message(chat_id=chat_id, text=generate_stock_msg(), parse_mode='Markdown')
-    
-    # دکمه‌ای که قفلش فعاله (قیمت خودرو)
-    elif text == "🚗 قیمت خودرو (ویژه)":
+    elif "ماشین‌حساب طلا" in text:
+        await gold_calc_start(update, context)
+    elif "دعوت از دوستان" in text:
+        invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+        
+        invite_count = 0
         try:
             res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
             invite_count = res.data[0].get('invite_count', 0) if res.data else 0
-            
-            if invite_count >= 5:
-                # اینجا بعدا کد قیمت خودرو رو میذاریم
-                await context.bot.send_message(chat_id=chat_id, text="🎉 تبریک! شما قفل این بخش را باز کرده‌اید. قیمت خودرو به زودی در اینجا قرار می‌گیرد.")
-            else:
-                invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"🔒 **این بخش قفل است.**\n\nبرای باز کردن این امکان ویژه، باید حداقل ۵ نفر با لینک اختصاصی شما وارد ربات شوند.\n\n"
-                         f"تعداد دعوت‌های فعلی شما: {invite_count} نفر\n\n"
-                         f"🔗 لینک اختصاصی شما:\n{invite_link}",
-                    parse_mode='Markdown'
-                )
         except Exception:
             pass
-
-    elif text == "🎁 دعوت از دوستان":
-        invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
-        
-        share_text = f"سلام! خواستم این کانال و ربات فوق‌العاده رو بهت معرفی کنم. 📢\n\nما در کانال دیجی نوسان قیمت‌های لحظه‌ای بازار (دلار، طلا، سکه، ارز دیجیتال و بورس) رو به‌روزرسانی می‌کنیم. حتماً عضو کانال شو:\nhttps://t.me/diginavasan\n\nعلاوه بر کانال، یک ربات اختصاصی هم داریم که امکانات ویژه‌ای مثل «ماشین‌حساب طلا» رو به صورت رایگان در اختیارت می‌ذاره. می‌تونی از ربات هم استفاده کنی:\n{invite_link}"
-
+            
         invite_text = f"""🎁 **دعوت از دوستان به دیجی نوسان** 🌟
 
 👥 تعداد افرادی که تاکنون دعوت کرده‌اید: **{invite_count}** نفر
 
-🤝 با ارسال پیام دعوت برای دوستانتان، می‌توانید آن‌ها را به کانال و ربات ما معرفی کنید. با دعوت ۵ نفر، قفل امکانات ویژه (مثل قیمت خودرو) باز می‌شود."""
+🔗 **لینک اختصاصی دعوت شما:**
+{invite_link}
+
+برای دعوت دوستانتان، می‌توانید این متن را کپی کرده یا از دکمه زیر برای ارسال مستقیم استفاده کنید."""
         
-        share_url = f"https://t.me/share/url?url={invite_link}&text={requests.utils.quote(share_text)}"
-        keyboard = [[InlineKeyboardButton("📤 ارسال متن دعوت به مخاطبین", url=share_url)]]
+        # متن ساده برای جلوگیری از خطای ارسال
+        share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
+        share_url = f"https://t.me/share/url?url={invite_link}&text={share_text}"
+        
+        keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown', reply_markup=reply_markup)
-        
-    elif text == "🧮 ماشین‌حساب طلا":
-        await gold_calc_start(update, context)
 
 # ==========================================
-# 🧮 ماشین‌حساب طلا (کاملاً آزاد برای همه)
+# 🧮 ماشین‌حساب طلا
 # ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 
@@ -379,7 +320,6 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    # قفل کاملاً برداشته شد. همه می‌تونن استفاده کنن.
     gold_price = get_nerkh_price_safe(["gold"])
     await context.bot.send_message(
         chat_id=chat_id,
@@ -502,7 +442,7 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     
     gold_conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^🧮 ماشین‌حساب طلا$"), gold_calc_start)],
+        entry_points=[MessageHandler(filters.Regex("ماشین‌حساب طلا"), gold_calc_start)],
         states={
             PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)],
             WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)],
@@ -518,13 +458,15 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('stats', admin_stats))
     
-    app.add_handler(MessageHandler(filters.Regex("^(💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|📈 شاخص‌های بورس|🚗 قیمت خودرو \\(ویژه\\)|🎁 دعوت از دوستان)$"), handle_menu_text))
+    # این بخش رو تغییر دادم که هر متنی رو بگیره تا باگ دکمه‌ها حل بشه
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
+    # زمان‌بندی: هر ۹۰۰ ثانیه (۱۵ دقیقه)
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. ماشین‌حساب آزاد و قیمت خودرو قفل شد...")
+    print("ربات روشن شد. منو کوتاه شد و باگ دعوت رفع شد...")
     app.run_polling()

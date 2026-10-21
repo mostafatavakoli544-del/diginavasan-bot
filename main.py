@@ -311,9 +311,9 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
             
-            # 🔴 اصلاح نهایی: فقط متن رو انکود میکنیم، لینک رو دست نمی‌زنیم
-            encoded_text = urllib.parse.quote(share_text)
-            share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
+            # ✅ اصلاح نهایی: استفاده از urlencode برای جلوگیری از خرابی لینک
+            params = {"url": invite_link, "text": share_text}
+            share_url = f"https://t.me/share/url?{urllib.parse.urlencode(params)}"
             
             keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)

@@ -219,7 +219,7 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی (دکمه استارت در بالا)
+# ⚙️ منوی اصلی
 # ==========================================
 def get_main_menu():
     keyboard = [
@@ -311,11 +311,9 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
             
-            # 🔴 اصلاح نهایی: انکود کردن لینک برای جلوگیری از خرابی علامت ?
-            encoded_url = urllib.parse.quote(invite_link, safe='')
+            # 🔴 اصلاح نهایی: فقط متن رو انکود میکنیم، لینک رو دست نمی‌زنیم
             encoded_text = urllib.parse.quote(share_text)
-            
-            share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+            share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
             
             keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -468,7 +466,6 @@ if __name__ == '__main__':
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
-            # 👈 این Fallback باعث میشه اگه کاربر وسط ماشین‌حساب دکمه منو رو زد، ربات گیر نکنه
             MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)
         ],
         allow_reentry=True
@@ -485,5 +482,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. باگ لینک دعوت و تداخل منو رفع شد...")
+    print("ربات روشن شد. باگ لینک دعوت رفع شد...")
     app.run_polling()

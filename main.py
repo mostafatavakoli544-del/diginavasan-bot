@@ -219,11 +219,11 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی (دکمه استارت در بالا و تمام عرض)
+# ⚙️ منوی اصلی (دکمه استارت در بالا)
 # ==========================================
 def get_main_menu():
     keyboard = [
-        [KeyboardButton("🚀 استارت / منوی اصلی")], # 👈 دکمه استارت در بالا و تمام عرض
+        [KeyboardButton("🚀 استارت / منوی اصلی")],
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
         [KeyboardButton("🎁 دعوت از دوستان")]
@@ -290,16 +290,17 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "ماشین‌حساب طلا" in text:
         await gold_calc_start(update, context)
     elif "دعوت از دوستان" in text:
-        invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
-        
-        invite_count = 0
         try:
-            res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
-            invite_count = res.data[0].get('invite_count', 0) if res.data else 0
-        except Exception:
-            pass
+            invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
             
-        invite_text = f"""🎁 **دعوت از دوستان به دیجی نوسان** 🌟
+            invite_count = 0
+            try:
+                res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
+                invite_count = res.data[0].get('invite_count', 0) if res.data else 0
+            except Exception:
+                pass
+                
+            invite_text = f"""🎁 **دعوت از دوستان به دیجی نوسان** 🌟
 
 👥 تعداد افرادی که تاکنون دعوت کرده‌اید: **{invite_count}** نفر
 
@@ -307,17 +308,22 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {invite_link}
 
 برای دعوت دوستانتان، از دکمه زیر استفاده کنید:"""
-        
-        # 🔴 رفع کامل باگ لینک دعوت: فقط متن رو انکود میکنیم، نه کل آدرس رو
-        share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
-        
-        encoded_text = urllib.parse.quote(share_text)
-        share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
-        
-        keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            share_text = "سلام! به کانال دیجی نوسان بپیوندید تا از قیمت‌های لحظه‌ای بازار باخبر شوید. ربات اختصاصی ما هم امکانات ویژه‌ای داره."
+            
+            # 🔴 اصلاح نهایی: انکود کردن لینک برای جلوگیری از خرابی علامت ?
+            encoded_url = urllib.parse.quote(invite_link, safe='')
+            encoded_text = urllib.parse.quote(share_text)
+            
+            share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+            
+            keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=share_url)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown', reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='Markdown', reply_markup=reply_markup)
+        except Exception as e:
+            print(f"Error in invite: {e}")
+            await context.bot.send_message(chat_id=chat_id, text="خطایی در ساخت لینک دعوت رخ داد. لطفاً بعداً تلاش کنید.")
 
 # ==========================================
 # 🧮 ماشین‌حساب طلا
@@ -339,7 +345,7 @@ async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PRICE
 
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "استارت" in update.message.text or "منوی اصلی" in update.message.text:
+    if "استارت" in update.message.text or "منوی اصلی" in update.message.text or "دعوت" in update.message.text:
         return ConversationHandler.END
     try:
         context.user_data['price'] = float(update.message.text.replace(',', ''))
@@ -460,7 +466,11 @@ if __name__ == '__main__':
             PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_profit)],
             TAX: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tax)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[
+            CommandHandler('cancel', cancel),
+            # 👈 این Fallback باعث میشه اگه کاربر وسط ماشین‌حساب دکمه منو رو زد، ربات گیر نکنه
+            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)
+        ],
         allow_reentry=True
     )
     
@@ -475,5 +485,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. دکمه استارت در بالا و باگ لینک رفع شد...")
+    print("ربات روشن شد. باگ لینک دعوت و تداخل منو رفع شد...")
     app.run_polling()

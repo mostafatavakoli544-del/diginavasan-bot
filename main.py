@@ -84,7 +84,26 @@ def get_nerkh_price_safe(keys_list):
 
 def get_crypto_prices_toman():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        
+        # تلاش اول: استفاده از بایننس (بسیار پایدار برای سرورها)
+        url = "https://api.binance.com/api/v3/ticker/price?symbols=[\"BTCUSDT\",\"ETHUSDT\",\"BNBUSDT\",\"SOLUSDT\",\"XRPUSDT\",\"DOGEUSDT\"]"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            usd_str = get_nerkh_price_safe(["dollar", "usd"])
+            usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
+            
+            if usd_float > 0:
+                prices = {}
+                for item in data:
+                    symbol = item['symbol'].replace('USDT', '') # تبدیل BTCUSDT به BTC
+                    usd_val = float(item['price'])
+                    prices[symbol] = f"{int(usd_val * usd_float):,.0f}"
+                prices['USDT'] = f"{int(1 * usd_float):,.0f}" # قیمت تتر برابر با دلار
+                return prices
+
+        # تلاش دوم: استفاده از CoinGecko (اگر بایننس جواب نداد)
         ids = "bitcoin,ethereum,tether,binancecoin,solana,ripple,dogecoin"
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
         res = requests.get(url, headers=headers, timeout=10)
@@ -97,8 +116,9 @@ def get_crypto_prices_toman():
                 prices = {}
                 for coin_id, coin_name in [("bitcoin", "BTC"), ("ethereum", "ETH"), ("tether", "USDT"), 
                                            ("binancecoin", "BNB"), ("solana", "SOL"), ("ripple", "XRP"), ("dogecoin", "DOGE")]:
-                    usd_val = data[coin_id]['usd']
-                    prices[coin_name] = f"{int(usd_val * usd_float):,.0f}"
+                    if coin_id in data:
+                        usd_val = data[coin_id]['usd']
+                        prices[coin_name] = f"{int(usd_val * usd_float):,.0f}"
                 return prices
     except Exception as e:
         print(f"Crypto error: {e}")
@@ -109,7 +129,6 @@ def get_crypto_prices_toman():
 # ==========================================
 def generate_infographic():
     try:
-        # باز کردن عکس قالب
         img = Image.open("template.jpg").convert("RGBA")
     except Exception as e:
         print(f"Template not found: {e}")
@@ -117,7 +136,6 @@ def generate_infographic():
     
     draw = ImageDraw.Draw(img)
     
-    # لود کردن فونت
     try:
         font_title = ImageFont.truetype("font.ttf", 45)
         font_text = ImageFont.truetype("font.ttf", 38)
@@ -131,26 +149,22 @@ def generate_infographic():
         reshaped_text = arabic_reshaper.reshape(text)
         return get_display(reshaped_text)
 
-    # گرفتن اطلاعات زمان
     day, shamsi, _, _, t, _ = get_dates_info()
     
-    # گرفتن قیمت‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
     gold18 = get_nerkh_price_safe(["gold"])
     coin_emami = get_nerkh_price_safe(["coin"])
     crypto = get_crypto_prices_toman()
 
-    # ابعاد عکس (برای محاسبه دقیق موقعیت‌ها)
     w, h = img.size
 
     # ------------------ کادر اول (ارزها) ------------------
-    y1 = int(h * 0.23) # شروع کادر اول
-    x_right = w - 70 # حاشیه از راست
+    y1 = int(h * 0.23)
+    x_right = w - 70
     
     draw.text((w//2, y1), fa("💱 قیمت لحظه‌ای ارزها"), font=font_title, fill=(255, 215, 0), anchor="mm")
     y1 += 60
-    
     draw.text((x_right, y1), fa(f"💵 دلار: {usd} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
     y1 += 50
     draw.text((x_right, y1), fa(f"💶 یورو: {eur} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
@@ -158,38 +172,35 @@ def generate_infographic():
     draw.text((x_right, y1), fa(f"⏰ آخرین آپدیت: {t}"), font=font_small, fill=(150, 200, 255), anchor="ra")
 
     # ------------------ کادر دوم (طلا و سکه) ------------------
-    y2 = int(h * 0.45) # شروع کادر دوم
+    y2 = int(h * 0.45)
     draw.text((w//2, y2), fa("🌕 قیمت طلا و سکه"), font=font_title, fill=(255, 215, 0), anchor="mm")
     y2 += 60
-    
     draw.text((x_right, y2), fa(f"🌕 طلا ۱۸ عیار: {gold18} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
     y2 += 50
     draw.text((x_right, y2), fa(f"🪙 سکه امامی: {coin_emami} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
 
     # ------------------ کادر سوم (کریپتو) ------------------
-    y3 = int(h * 0.67) # شروع کادر سوم
+    y3 = int(h * 0.67)
     draw.text((w//2, y3), fa("🪙 قیمت ارز دیجیتال"), font=font_title, fill=(255, 215, 0), anchor="mm")
     y3 += 60
 
     if crypto:
-        for symbol in ["BTC", "ETH", "USDT"]: # فقط ۳ ارز اصلی برای جا شدن در کادر
+        for symbol in ["BTC", "ETH", "USDT"]:
             if symbol in crypto:
                 draw.text((x_right, y3), fa(f"🔸 {symbol}: {crypto[symbol]} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
                 y3 += 50
     else:
         draw.text((x_right, y3), fa("خطا در دریافت اطلاعات"), font=font_text, fill=(255, 100, 100), anchor="ra")
 
-    # تبدیل به بایت برای ارسال در تلگرام
     bio = BytesIO()
     bio.name = 'summary.jpeg'
-    img = img.convert("RGB") # تبدیل به RGB برای جلوگیری از خطای JPEG
+    img = img.convert("RGB")
     img.save(bio, 'JPEG', quality=95)
     bio.seek(0)
     return bio
 
-
 # ==========================================
-# ⚙️ ارسال به کانال (متن‌ها)
+# ⚙️ ارسال به کانال
 # ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
@@ -252,10 +263,10 @@ async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
     msg += TEMPLATES['footer']
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE):
+async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     img_bio = generate_infographic()
     await context.bot.send_photo(
-        chat_id=CHANNEL_ID, 
+        chat_id=chat_id, 
         photo=img_bio, 
         caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan",
         parse_mode='Markdown'
@@ -284,27 +295,24 @@ async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
 @diginavasan"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
-# ==========================================
-# ⚙️ چرخش ۴ مرحله‌ای (متن، متن، متن، عکس)
-# ==========================================
 _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
     global _rotation_index
-    # حالا ۴ تا شغل داریم که به ترتیب اجرا میشن
     jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی
+# ⚙️ منوی اصلی (با دکمه تست عکس)
 # ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
+        [KeyboardButton("🖼️ تست عکس (TEMP)")], # دکمه تست
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -334,9 +342,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👇 **از منوی زیر (پایین صفحه) یکی از گزینه‌ها را انتخاب کنید:**"""
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
-# ==========================================
-# ⚙️ مدیریت پیام‌های متنی
-# ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
@@ -352,6 +357,9 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_gold_to_channel(context)
     elif "قیمت ارز دیجیتال" in text:
         await send_crypto_to_channel(context)
+    elif "تست عکس" in text:
+        # ارسال عکس به چت خود کاربر (برای تست)
+        await send_image_summary_to_channel(context, chat_id=chat_id)
     elif "ماشین‌حساب طلا" in text:
         await gold_calc_start(update, context)
     elif "دعوت از دوستان" in text:
@@ -506,7 +514,7 @@ if __name__ == '__main__':
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
-            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)
+            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🖼️ تست عکس \\(TEMP\\))$"), handle_menu_text)
         ],
         allow_reentry=True
     )
@@ -519,8 +527,7 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
-    # چرخش هر ۱۵ دقیقه (۹۰۰ ثانیه)
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. چرخش ۴ مرحله‌ای (با عکس) فعال شد...")
+    print("ربات روشن شد. سیستم تست عکس و بایننس فعال شد...")
     app.run_polling()

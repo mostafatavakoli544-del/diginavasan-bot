@@ -49,14 +49,8 @@ def run_dummy_server():
 def get_dates_info():
     tehran_tz = pytz.timezone('Asia/Tehran')
     now = datetime.now(tehran_tz)
-    shamsi_date = jdatetime.date.fromgregorian(date=now.date()).strftime('%Y/%m/%d')
-    hijri_date = convert.Gregorian(now.year, now.month, now.day).to_hijri()
-    hijri_str = f"{hijri_date.year}/{hijri_date.month}/{hijri_date.day}"
-    gregorian_str = now.strftime('%Y/%m/%d')
-    days = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
-    day_name = days[now.weekday()]
     time_str = now.strftime('%H:%M')
-    return day_name, shamsi_date, hijri_str, gregorian_str, time_str, now.hour
+    return "", "", "", "", time_str, now.hour
 
 def is_working_hours():
     _, _, _, _, _, hour = get_dates_info()
@@ -85,16 +79,7 @@ def get_nerkh_price_safe(keys_list):
 def get_crypto_prices_toman():
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        coins = {
-            "BTC": "btc",
-            "ETH": "eth",
-            "USDT": "usdt",
-            "BNB": "bnb",
-            "SOL": "sol",
-            "XRP": "xrp",
-            "DOGE": "doge"
-        }
-        
+        coins = {"BTC": "btc", "ETH": "eth", "USDT": "usdt"}
         prices = {}
         for symbol, coin_id in coins.items():
             url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={coin_id}&dstCurrency=rls"
@@ -106,19 +91,18 @@ def get_crypto_prices_toman():
                     price_toman = int(float(data['stats'][key]['latest']) / 10)
                     prices[symbol] = f"{price_toman:,.0f}"
         return prices
-    except Exception as e:
-        print(f"Crypto error: {e}")
+    except Exception:
         return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس با قالب جدید
+# 🎨 تابع ساخت عکس با فونت اصلاح شده
 # ==========================================
 def generate_infographic():
-    font_path = "font.ttf"
+    # دانلود فونت از یک لینک بسیار پایدار
+    font_path = "vazir.ttf"
     if not os.path.exists(font_path):
         try:
-            print("Downloading Vazirmatn font...")
-            font_url = "https://github.com/rastikerdar/vazirmatn/raw/master/fonts/ttf/Vazirmatn-Bold.ttf"
+            font_url = "https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/ttf/Vazirmatn-Bold.ttf"
             r = requests.get(font_url, timeout=15)
             with open(font_path, 'wb') as f:
                 f.write(r.content)
@@ -127,37 +111,30 @@ def generate_infographic():
 
     try:
         img = Image.open("template.jpg").convert("RGBA")
-    except Exception as e:
-        print(f"Template not found, using solid color: {e}")
+    except Exception:
         img = Image.new('RGB', (1080, 1920), color=(15, 25, 45))
     
     draw = ImageDraw.Draw(img)
+    w, h = img.size
+    scale = w / 1080.0
     
+    # لود فونت با سایزهای متناسب
     try:
-        # فونت‌ها را نسبت به سایز عکس مقیاس می‌کنیم تا روی هر قالبی درست باشد
-        w, h = img.size
-        scale = w / 1080.0 # مقیاس بر اساس عرض 1080
-        
         font_title = ImageFont.truetype(font_path, int(35 * scale))
-        font_text = ImageFont.truetype(font_path, int(28 * scale))
-        font_small = ImageFont.truetype(font_path, int(22 * scale))
-    except Exception as e:
-        print(f"Font load error: {e}")
+        font_text = ImageFont.truetype(font_path, int(30 * scale))
+    except Exception:
         font_title = ImageFont.load_default()
         font_text = ImageFont.load_default()
-        font_small = ImageFont.load_default()
 
+    # تابع اصلاح متن (چسباندن و راست‌چین کردن)
     def fa(text):
-        try:
-            reshaped_text = arabic_reshaper.reshape(text)
-            bidi_text = get_display(reshaped_text)
-            return bidi_text
-        except:
-            return text
+        reshaped_text = arabic_reshaper.reshape(text)
+        bidi_text = get_display(reshaped_text)
+        return bidi_text
 
-    day, shamsi, _, _, t, _ = get_dates_info()
+    _, _, _, _, t, _ = get_dates_info()
     
-    # گرفتن داده‌ها
+    # داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
     gbp = get_nerkh_price_safe(["pound"])
@@ -175,16 +152,13 @@ def generate_infographic():
     
     crypto = get_crypto_prices_toman()
 
-    # ------------------ مختصات‌دهی بر اساس درصد (نسبت به سایز عکس) ------------------
+    # ------------------ مختصات‌دهی ------------------
 
-    # ۱. کادر بالای سمت چپ (عنوان)
-    # با توجه به انعکاس نور روی طلایی، از رنگ سرمه‌ای تیره برای متن استفاده میکنیم
-    title_text = fa("قیمت لحظه‌ای بازار")
-    draw.text((w * 0.28, h * 0.055), title_text, font=font_title, fill=(20, 30, 50), anchor="mm")
+    # ۱. کادر بالا سمت چپ (عنوان)
+    draw.text((w * 0.28, h * 0.06), fa("قیمت لحظه‌ای بازار"), font=font_title, fill=(20, 30, 50), anchor="mm")
 
-    # ۲. کادر بالای سمت راست (ساعت)
-    time_text = fa(t)
-    draw.text((w * 0.83, h * 0.06), time_text, font=font_text, fill=(20, 30, 50), anchor="mm")
+    # ۲. کادر بالا سمت راست (ساعت)
+    draw.text((w * 0.83, h * 0.065), fa(t), font=font_text, fill=(20, 30, 50), anchor="mm")
 
     # ۳. ستون بلند سمت چپ (ارزها)
     currencies = [
@@ -197,34 +171,28 @@ def generate_infographic():
         f"دلار کانادا: {cad}",
         f"دلار استرالیا: {aud}"
     ]
-    
-    y_start = h * 0.285  # شروع از بالای کادر اول
-    y_step = h * 0.039   # فاصله بین خطوط
-    x_cur_right = w * 0.43 # فاصله از سمت راست کادر ستون چپ
-    
+    y_start = h * 0.285
+    y_step = h * 0.039
+    x_cur_right = w * 0.43 
     for i, curr in enumerate(currencies):
-        y_pos = y_start + (i * y_step)
-        draw.text((x_cur_right, y_pos), fa(curr), font=font_text, fill=(255, 255, 255), anchor="ra")
+        draw.text((x_cur_right, y_start + (i * y_step)), fa(curr), font=font_text, fill=(255, 255, 255), anchor="ra")
 
     # ۴. کادر بالا سمت راست (طلا)
     draw.text((w * 0.91, h * 0.27), fa(f"طلا ۱۸: {gold18}"), font=font_text, fill=(255, 255, 255), anchor="ra")
 
     # ۵. کادر وسط سمت راست (سکه‌ها)
+    coins_list = [f"امامی: {coin_emami}", f"بهار: {coin_bahar}", f"نیم: {coin_nim}", f"ربع: {coin_rob}"]
     y_coin_start = h * 0.51
-    coins_list = [
-        f"امامی: {coin_emami}",
-        f"بهار: {coin_bahar}",
-        f"نیم: {coin_nim}",
-        f"ربع: {coin_rob}"
-    ]
     for i, coin in enumerate(coins_list):
-        y_pos = y_coin_start + (i * (h * 0.035))
-        draw.text((w * 0.91, y_pos), fa(coin), font=font_text, fill=(255, 255, 255), anchor="ra")
+        draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), fa(coin), font=font_text, fill=(255, 255, 255), anchor="ra")
 
-    # ۶. کادر پایین سمت راست (نقره - فعلا خالی می‌گذاریم)
-    # draw.text((w * 0.91, h * 0.73), fa("نقره: ..."), font=font_text, fill=(255, 255, 255), anchor="ra")
+    # ۶. کادر پایین سمت راست (کریپتو)
+    if crypto:
+        crypto_list = [f"{sym}: {prc}" for sym, prc in crypto.items()]
+        y_crypto_start = h * 0.73
+        for i, c in enumerate(crypto_list):
+            draw.text((w * 0.91, y_crypto_start + (i * (h * 0.035))), fa(c), font=font_text, fill=(255, 255, 255), anchor="ra")
 
-    # ارسال به تلگرام
     bio = BytesIO()
     bio.name = 'summary.jpeg'
     img = img.convert("RGB")
@@ -233,7 +201,7 @@ def generate_infographic():
     return bio
 
 # ==========================================
-# ⚙️ توابع ارسال
+# ⚙️ ارسال به کانال
 # ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
@@ -302,15 +270,8 @@ async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat
     )
 
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
-    day, shamsi, hijri, greg, t, _ = get_dates_info()
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
 صبح بخیر! بازار امروز آغاز شد. ☀️
-
-📅 امروز: **{day}**
-🗓 شمسی: \u200e`{shamsi}`
-🌙 قمری: \u200e`{hijri}`
-📆 میلادی: \u200e`{greg}`
-⏰ ساعت: \u200e`{t}`
 
 *💰 دیجی نوسان 👇*
 @diginavasan"""
@@ -557,5 +518,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. قالب جدید و مختصات دقیق اعمال شد...")
+    print("ربات روشن شد. سیستم فونت و قالب جدید اعمال شد...")
     app.run_polling()

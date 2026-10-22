@@ -107,7 +107,7 @@ def download_image(url, size=(60, 60)):
         return None
 
 # ==========================================
-# 🎨 تابع ساخت عکس (با فونت بزرگ‌تر و جایگذاری دقیق)
+# 🎨 تابع ساخت عکس (اصلاح دقیق مختصات و سایز فونت)
 # ==========================================
 def generate_infographic():
     font_path = "vazir.ttf"
@@ -130,12 +130,15 @@ def generate_infographic():
     scale = w / 1080.0
     
     try:
-        # فونت بزرگتر برای خوانایی بهتر
-        font_title = ImageFont.truetype(font_path, int(48 * scale))
-        font_text = ImageFont.truetype(font_path, int(34 * scale)) 
+        font_title = ImageFont.truetype(font_path, int(45 * scale))
+        # فونت ستون چپ (ارزها) بزرگتر
+        font_text_left = ImageFont.truetype(font_path, int(34 * scale)) 
+        # فونت ستون راست (طلا و کریپتو) کمی کوچکتر برای جلوگیری از تداخل
+        font_text_right = ImageFont.truetype(font_path, int(28 * scale))
     except Exception:
         font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
+        font_text_left = ImageFont.load_default()
+        font_text_right = ImageFont.load_default()
 
     def fa(text):
         if HAS_RAQM:
@@ -143,7 +146,7 @@ def generate_infographic():
         reshaped_text = arabic_reshaper.reshape(text)
         return get_display(reshaped_text)
 
-    # اضافه کردن استروک (حاشیه) مشکی برای بولدتر شدن متن
+    # استروک مشکی برای خوانایی روی هر پس‌زمینه‌ای
     def draw_text(text, x, y, font, color, anchor):
         if HAS_RAQM:
             draw.text((x, y), text, font=font, fill=color, anchor=anchor, direction="rtl", stroke_width=1, stroke_fill=(0,0,0))
@@ -152,9 +155,9 @@ def generate_infographic():
 
     time_str, _ = get_dates_info()
     
-    # ۱. هدر (اسم کانال و ساعت)
-    draw_text("دیجی نوسان", w * 0.35, h * 0.06, font_title, (20, 30, 50), "mm")
-    draw_text(time_str, w * 0.85, h * 0.06, font_text, (20, 30, 50), "mm")
+    # ۱. هدر (اسم کانال و ساعت) - ساعت کمی پایین‌تر و چپ‌تر رفت تا روی خط طلایی نیفته
+    draw_text("دیجی نوسان", w * 0.35, h * 0.065, font_title, (20, 30, 50), "mm")
+    draw_text(time_str, w * 0.82, h * 0.065, font_text_right, (20, 30, 50), "mm")
 
     # ۲. دریافت داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
@@ -175,9 +178,9 @@ def generate_infographic():
     
     crypto = get_crypto_prices_toman()
 
-    icon_size = int(35 * scale)
+    icon_size = int(32 * scale)
 
-    # ۳. مختصات ستون چپ (ارزها) - ۸ ردیف
+    # ۳. ستون چپ (ارزها)
     y_start_left = h * 0.23
     y_step_left = (h * 0.69) / 8
     
@@ -194,17 +197,13 @@ def generate_infographic():
     
     for i, (country_code, text) in enumerate(currencies):
         y_pos = y_start_left + (i * y_step_left) + (y_step_left / 2)
-        
-        # لوگو دقیقاً در مرکز دایره سمت چپ
         icon_url = f"https://flagcdn.com/w80/{country_code}.png"
         icon = download_image(icon_url, size=(icon_size, icon_size))
         if icon:
             img.paste(icon, (int(w * 0.08) - icon_size//2, int(y_pos) - icon_size//2), icon)
-            
-        # متن راست‌چین با فاصله مناسب از لبه راست کادر
-        draw_text(fa(text), w * 0.44, y_pos, font_text, (255, 255, 255), "rm")
+        draw_text(fa(text), w * 0.44, y_pos, font_text_left, (255, 255, 255), "rm")
 
-    # ۴. کادر بالا سمت راست (طلا و سکه) - ۶ ردیف
+    # ۴. کادر بالا سمت راست (طلا و سکه)
     y_start_top = h * 0.23
     y_step_top = (h * 0.32) / 6
     
@@ -219,16 +218,14 @@ def generate_infographic():
 
     for i, (text, icon_url) in enumerate(gold_items):
         y_pos = y_start_top + (i * y_step_top) + (y_step_top / 2)
-        
         icon = download_image(icon_url, size=(icon_size, icon_size))
         if icon:
-            # لوگو دقیقاً در مرکز دایره سمت راست
             img.paste(icon, (int(w * 0.90) - icon_size//2, int(y_pos) - icon_size//2), icon)
-            
-        # متن کمی دورتر از لوگو
-        draw_text(fa(text), w * 0.84, y_pos, font_text, (255, 255, 255), "rm")
+        
+        # متن به سمت چپ‌تر منتقل شد (w*0.82) تا با دایره‌ها تداخل نداشته باشه
+        draw_text(fa(text), w * 0.82, y_pos, font_text_right, (255, 255, 255), "rm")
 
-    # ۵. کادر پایین سمت راست (کریپتو) - ۴ ردیف
+    # ۵. کادر پایین سمت راست (کریپتو)
     y_start_bot = h * 0.62
     y_step_bot = (h * 0.25) / 4
     
@@ -246,14 +243,12 @@ def generate_infographic():
 
     for i, (text, icon_url) in enumerate(crypto_items):
         y_pos = y_start_bot + (i * y_step_bot) + (y_step_bot / 2)
-        
         icon = download_image(icon_url, size=(icon_size, icon_size))
         if icon:
-            # لوگو دقیقاً در مرکز دایره سمت راست
             img.paste(icon, (int(w * 0.90) - icon_size//2, int(y_pos) - icon_size//2), icon)
-            
-        # متن کمی دورتر از لوگو
-        draw_text(fa(text), w * 0.84, y_pos, font_text, (255, 255, 255), "rm")
+        
+        # متن به سمت چپ‌تر منتقل شد (w*0.82)
+        draw_text(fa(text), w * 0.82, y_pos, font_text_right, (255, 255, 255), "rm")
 
     bio = BytesIO()
     bio.name = 'summary.jpeg'
@@ -580,5 +575,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. فونت بولد و مختصات اصلاح شد...")
+    print("ربات روشن شد. فونت‌ها و مختصات برای آخرین بار اصلاح شد...")
     app.run_polling()

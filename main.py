@@ -41,6 +41,20 @@ TEMPLATES = {
 HAS_RAQM = features.check("raqm")
 
 # ==========================================
+# 📊 تابع جدید: ثبت رفتار کاربر در دیتابیس
+# ==========================================
+def log_event(user_id, event_name, metadata=None):
+    try:
+        data = {
+            "user_id": user_id,
+            "event_name": event_name,
+            "metadata": metadata or {}
+        }
+        supabase.table('user_events').insert(data).execute()
+    except Exception as e:
+        print(f"Error logging event: {e}")
+
+# ==========================================
 # ⚙️ توابع پایه
 # ==========================================
 def run_dummy_server():
@@ -307,7 +321,7 @@ def generate_infographic():
     return bio
 
 # ==========================================
-# ⚙️ ارسال به کانال/چت (با قابلیت تفکیک مقصد)
+# ⚙️ ارسال به کانال
 # ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
@@ -398,7 +412,6 @@ _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
     global _rotation_index
-    # توابع بدون chat_id صدا زده میشن، پس به صورت پیش‌فرض به CHANNEL_ID میرن
     jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
@@ -416,6 +429,9 @@ def get_main_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     first_name = update.effective_user.first_name or "کاربر"
+    
+    # ثبت لاگ ورود کاربر
+    log_event(user_id, "start_bot")
     
     invite_count = 0
     try:
@@ -447,16 +463,21 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
 
-    # 🔴 در اینجا chat_id کاربر پاس داده میشه تا به چت خودش بره
+    # 🔴 ثبت لاگ کلیک‌ها در دیتابیس
     if "قیمت ارزها" in text:
+        log_event(user_id, "view_fiat_prices")
         await send_fiat_to_channel(context, chat_id=chat_id)
     elif "قیمت طلا و سکه" in text:
+        log_event(user_id, "view_gold_prices")
         await send_gold_to_channel(context, chat_id=chat_id)
     elif "قیمت ارز دیجیتال" in text:
+        log_event(user_id, "view_crypto_prices")
         await send_crypto_to_channel(context, chat_id=chat_id)
     elif "ماشین‌حساب طلا" in text:
+        log_event(user_id, "open_gold_calculator")
         await gold_calc_start(update, context)
     elif "دعوت از دوستان" in text:
+        log_event(user_id, "view_invite_menu")
         try:
             invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
             invite_count = 0
@@ -623,5 +644,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. تفکیک چت خصوصی از کانال انجام شد...")
+    print("ربات روشن شد. سیستم لاگ‌برداری فعال شد...")
     app.run_polling()

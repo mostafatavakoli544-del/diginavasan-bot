@@ -41,14 +41,13 @@ TEMPLATES = {
 HAS_RAQM = features.check("raqm")
 
 # ==========================================
-# 📊 تابع جدید: ثبت رفتار کاربر در دیتابیس
+# 📊 تابع جدید: ثبت رفتار کاربر در دیتابیس (بدون metadata)
 # ==========================================
-def log_event(user_id, event_name, metadata=None):
+def log_event(user_id, event_name):
     try:
         data = {
             "user_id": user_id,
-            "event_name": event_name,
-            "metadata": metadata or {}
+            "event_name": event_name
         }
         supabase.table('user_events').insert(data).execute()
     except Exception as e:
@@ -308,7 +307,7 @@ def generate_infographic():
             img.paste(icon, (int(980) - icon_size//2, int(y_pos) - icon_size//2), icon)
         
         draw_text(fa(f"{name}:"), 940, y_pos, font_text_right, (200, 200, 200), "rm")
-        name_width = draw.textlength(fa(f"{name}:"), font=font_text_right)
+        name_width = draw.textlength(fa(f"{name}:"), font_text_right)
         draw_text(fa(price), 940 - name_width - 20, y_pos, font_text_right, (255, 215, 0), "rm")
 
     final_img = Image.alpha_composite(img, overlay)
@@ -644,5 +643,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم لاگ‌برداری فعال شد...")
+    print("ربات روشن شد. سیستم لاگ‌برداری بدون metadata فعال شد...")
     app.run_polling()

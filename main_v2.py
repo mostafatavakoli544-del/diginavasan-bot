@@ -10,7 +10,7 @@ import urllib.parse
 from io import BytesIO
 from hijri_converter import convert
 from datetime import datetime, time
-from pictex import Canvas, Column, Row, Text, Image as PicImage
+from pictex import Canvas, Row, Column, Text, Image as PicImage, Shadow, LinearGradient
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
@@ -37,7 +37,7 @@ TEMPLATES = {
 }
 
 # ==========================================
-# ⚙️ توابع پایه (دریافت قیمت‌ها)
+# ⚙️ توابع پایه
 # ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
@@ -93,10 +93,17 @@ def get_crypto_prices_toman():
         return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس با PicTex (هوشمند)
+# 🎨 تابع ساخت عکس (کاملاً گرافیکی با PicTex)
 # ==========================================
 def generate_infographic_pictex():
-    # ۱. دریافت داده‌ها
+    # ۱. دانلود فونت
+    font_path = "vazir.ttf"
+    if not os.path.exists(font_path):
+        r = requests.get("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/ttf/Vazirmatn-Bold.ttf")
+        with open(font_path, 'wb') as f:
+            f.write(r.content)
+    
+    # ۲. دریافت داده‌ها
     time_str, _ = get_dates_info()
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
@@ -116,46 +123,32 @@ def generate_infographic_pictex():
     
     crypto = get_crypto_prices_toman()
 
-    # ۲. دانلود فونت در صورت نیاز
-    font_path = "vazir.ttf"
-    if not os.path.exists(font_path):
-        r = requests.get("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/ttf/Vazirmatn-Bold.ttf")
-        with open(font_path, 'wb') as f:
-            f.write(r.content)
-    
-    # ۳. ساخت کانواس با پس‌زمینه
-    canvas = Canvas(width=1080, height=1920)
-    if os.path.exists("template.jpg"):
-        canvas.add(PicImage("template.jpg").set_position(0, 0))
+    # ۳. ساخت استایل‌ها
+    title_style = Text("").font_family(font_path).font_size(45).font_weight(700).color("#FFD700")
+    text_style = Text("").font_family(font_path).font_size(28).color("white")
+    small_style = Text("").font_family(font_path).font_size(22).color("#E0E0E0")
 
-    # ۴. هدر (بالای صفحه)
-    header = Row(width="100%", height=150, align_items="center", justify_content="space-between", padding=(30, 0))
-    header.add(Text("دیجی نوسان", font_path=font_path, font_size=45, color="#142132"))
-    header.add(Text(time_str, font_path=font_path, font_size=35, color="#142132"))
-    canvas.add(header)
+    # ۴. ساخت بخش هدر
+    header = Row(
+        Text("دیجی نوسان").font_family(font_path).font_size(50).font_weight(700).color("#FFD700"),
+        Text(time_str).font_family(font_path).font_size(35).color("#AAAAAA"),
+    ).width("100%").justify_content("space-between").align_items("center").padding(30)
 
-    # ۵. بخش اصلی (دو ستون)
-    main_row = Row(width="100%", height=1550, padding=(40, 0))
-
-    # ---------- ستون چپ: ارزها ----------
-    left_column = Column(width="45%", height="100%", justify_content="space-around")
+    # ۵. ساخت بخش ارزها (ستون چپ)
     currencies = [
-        ("us", f"دلار: {usd}"), ("eu", f"یورو: {eur}"), ("gb", f"پوند: {gbp}"), ("ae", f"درهم: {aed}"),
-        ("tr", f"لیر: {lira}"), ("cn", f"یوان: {cny}"), ("ca", f"دلار کانادا: {cad}"), ("au", f"دلار استرالیا: {aud}")
+        (f"دلار: {usd}", "us"), (f"یورو: {eur}", "eu"), (f"پوند: {gbp}", "gb"), (f"درهم: {aed}", "ae"),
+        (f"لیر: {lira}", "tr"), (f"یوان: {cny}", "cn"), (f"دلار کانادا: {cad}", "ca"), (f"دلار استرالیا: {aud}", "au")
     ]
-    for country_code, text in currencies:
-        row = Row(width="100%", align_items="center", gap=15)
-        flag_img = PicImage(f"https://flagcdn.com/w80/{country_code}.png", width=40, height=40)
-        row.add(flag_img)
-        row.add(Text(text, font_path=font_path, font_size=30, color="white", direction="rtl"))
-        left_column.add(row)
     
-    main_row.add(left_column)
+    currency_rows = []
+    for text, country_code in currencies:
+        flag = PicImage(f"https://flagcdn.com/w80/{country_code}.png").size(40, 40).border_radius("50%")
+        row = Row(flag, Text(text).font_family(font_path).font_size(30).color("white")).align_items("center").gap(15)
+        currency_rows.append(row)
 
-    # ---------- ستون راست: طلا و کریپتو ----------
-    right_column = Column(width="55%", height="100%", justify_content="space-between")
+    currency_section = Column(*currency_rows).background_color("#1E2A38").border_radius(20).padding(20).gap(15).width("45%")
 
-    # کادر بالایی: طلا و سکه
+    # ۶. ساخت بخش طلا و کریپتو (ستون راست)
     gold_items = [
         (f"طلا ۱۸: {gold18}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
         (f"طلا ۲۴: {gold24}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
@@ -164,15 +157,15 @@ def generate_infographic_pictex():
         (f"نیم سکه: {coin_nim}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
         (f"ربع سکه: {coin_rob}", "https://cdn-icons-png.flaticon.com/512/217/217488.png")
     ]
-    gold_box = Column(width="100%", height="55%", justify_content="space-around")
+    
+    gold_rows = []
     for text, icon_url in gold_items:
-        row = Row(width="100%", align_items="center", justify_content="flex-end", gap=15)
-        row.add(Text(text, font_path=font_path, font_size=28, color="white", direction="rtl"))
-        row.add(PicImage(icon_url, width=35, height=35))
-        gold_box.add(row)
-    right_column.add(gold_box)
+        icon = PicImage(icon_url).size(35, 35)
+        row = Row(Text(text).font_family(font_path).font_size(28).color("white"), icon).align_items("center").justify_content("flex-end").gap(10)
+        gold_rows.append(row)
 
-    # کادر پایینی: کریپتو
+    gold_section = Column(*gold_rows).background_color("#1E2A38").border_radius(20).padding(20).gap(12).width("50%")
+
     crypto_icons = {
         "BTC": "https://cryptologos.cc/logos/bitcoin-btc-logo.png",
         "ETH": "https://cryptologos.cc/logos/ethereum-eth-logo.png",
@@ -184,21 +177,29 @@ def generate_infographic_pictex():
     else:
         crypto_items = [("خطا در دریافت", crypto_icons["BTC"])]
 
-    crypto_box = Column(width="100%", height="40%", justify_content="space-around")
+    crypto_rows = []
     for text, icon_url in crypto_items:
-        row = Row(width="100%", align_items="center", justify_content="flex-end", gap=15)
-        row.add(Text(text, font_path=font_path, font_size=28, color="white", direction="rtl"))
-        row.add(PicImage(icon_url, width=35, height=35))
-        crypto_box.add(row)
-    right_column.add(crypto_box)
+        icon = PicImage(icon_url).size(35, 35)
+        row = Row(Text(text).font_family(font_path).font_size(28).color("white"), icon).align_items("center").justify_content("flex-end").gap(10)
+        crypto_rows.append(row)
 
-    main_row.add(right_column)
-    canvas.add(main_row)
+    crypto_section = Column(*crypto_rows).background_color("#1E2A38").border_radius(20).padding(20).gap(12).width("50%")
 
-    # ۶. خروجی گرفتن
+    right_column = Column(gold_section, crypto_section).width("55%").gap(20)
+
+    # ۷. چیدمان نهایی
+    main_layout = Column(
+        header,
+        Row(currency_section, right_column).width("100%").align_items("flex-start").gap(20),
+    ).background_color("#0F1A26").padding(30).gap(20)
+
+    # ۸. رندر و خروجی
+    canvas = Canvas(width=1080, height=1920)
+    image = canvas.render(main_layout)
+    
     bio = BytesIO()
-    canvas.save(bio, format="JPEG", quality=95)
     bio.name = 'summary.jpeg'
+    image.save(bio, 'JPEG', quality=95)
     bio.seek(0)
     return bio
 
@@ -263,13 +264,16 @@ async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
-    img_bio = generate_infographic_pictex()
-    await context.bot.send_photo(
-        chat_id=chat_id, 
-        photo=img_bio, 
-        caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan",
-        parse_mode='Markdown'
-    )
+    try:
+        img_bio = generate_infographic_pictex()
+        await context.bot.send_photo(
+            chat_id=chat_id, 
+            photo=img_bio, 
+            caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        print(f"خطا در ساخت عکس: {e}")
 
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
@@ -289,8 +293,10 @@ async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
 
 _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
-    if not is_working_hours(): return
     global _rotation_index
+    if not is_working_hours(): return
+    
+    # چرخش ۴ مرحله‌ای: ۳ پیام متنی + ۱ عکس
     jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
@@ -515,7 +521,8 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
+    # چرخش هر ۱۵ دقیقه (۹۰۰ ثانیه)
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("نسخه ۲ ربات روشن شد. موتور PicTex فعال است...")
+    print("ربات روشن شد. نسخه گرافیکی PicTex (بدون قالب) فعال است...")
     app.run_polling()

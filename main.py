@@ -82,7 +82,6 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
-# استفاده از نوبیتکس برای دریافت قیمت کریپتو (بدون بلاک شدن)
 def get_crypto_prices_toman():
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -112,9 +111,20 @@ def get_crypto_prices_toman():
         return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس
+# 🎨 تابع ساخت عکس با قالب جدید
 # ==========================================
 def generate_infographic():
+    font_path = "font.ttf"
+    if not os.path.exists(font_path):
+        try:
+            print("Downloading Vazirmatn font...")
+            font_url = "https://github.com/rastikerdar/vazirmatn/raw/master/fonts/ttf/Vazirmatn-Bold.ttf"
+            r = requests.get(font_url, timeout=15)
+            with open(font_path, 'wb') as f:
+                f.write(r.content)
+        except Exception as e:
+            print(f"Font download failed: {e}")
+
     try:
         img = Image.open("template.jpg").convert("RGBA")
     except Exception as e:
@@ -123,65 +133,98 @@ def generate_infographic():
     
     draw = ImageDraw.Draw(img)
     
-    # تلاش برای لود فونت
     try:
-        font_title = ImageFont.truetype("font.ttf", 45)
-        font_text = ImageFont.truetype("font.ttf", 35)
-        font_small = ImageFont.truetype("font.ttf", 25)
+        # فونت‌ها را نسبت به سایز عکس مقیاس می‌کنیم تا روی هر قالبی درست باشد
+        w, h = img.size
+        scale = w / 1080.0 # مقیاس بر اساس عرض 1080
+        
+        font_title = ImageFont.truetype(font_path, int(35 * scale))
+        font_text = ImageFont.truetype(font_path, int(28 * scale))
+        font_small = ImageFont.truetype(font_path, int(22 * scale))
     except Exception as e:
         print(f"Font load error: {e}")
         font_title = ImageFont.load_default()
         font_text = ImageFont.load_default()
         font_small = ImageFont.load_default()
 
-    # تابع اصلاح متن فارسی
     def fa(text):
-        reshaped_text = arabic_reshaper.reshape(text)
-        return get_display(reshaped_text)
+        try:
+            reshaped_text = arabic_reshaper.reshape(text)
+            bidi_text = get_display(reshaped_text)
+            return bidi_text
+        except:
+            return text
 
     day, shamsi, _, _, t, _ = get_dates_info()
     
+    # گرفتن داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
+    gbp = get_nerkh_price_safe(["pound"])
+    aed = get_nerkh_price_safe(["aed"])
+    lira = get_nerkh_price_safe(["lira"])
+    cny = get_nerkh_price_safe(["yuan"])
+    cad = get_nerkh_price_safe(["cad"])
+    aud = get_nerkh_price_safe(["aud"])
+    
     gold18 = get_nerkh_price_safe(["gold"])
     coin_emami = get_nerkh_price_safe(["coin"])
+    coin_bahar = get_nerkh_price_safe(["bahar"])
+    coin_nim = get_nerkh_price_safe(["half"])
+    coin_rob = get_nerkh_price_safe(["quarter"])
+    
     crypto = get_crypto_prices_toman()
 
-    w, h = img.size
+    # ------------------ مختصات‌دهی بر اساس درصد (نسبت به سایز عکس) ------------------
 
-    # ------------------ کادر اول (ارزها) ------------------
-    y1 = int(h * 0.23)
-    x_right = w - 70
+    # ۱. کادر بالای سمت چپ (عنوان)
+    # با توجه به انعکاس نور روی طلایی، از رنگ سرمه‌ای تیره برای متن استفاده میکنیم
+    title_text = fa("قیمت لحظه‌ای بازار")
+    draw.text((w * 0.28, h * 0.055), title_text, font=font_title, fill=(20, 30, 50), anchor="mm")
+
+    # ۲. کادر بالای سمت راست (ساعت)
+    time_text = fa(t)
+    draw.text((w * 0.83, h * 0.06), time_text, font=font_text, fill=(20, 30, 50), anchor="mm")
+
+    # ۳. ستون بلند سمت چپ (ارزها)
+    currencies = [
+        f"دلار: {usd}",
+        f"یورو: {eur}",
+        f"پوند: {gbp}",
+        f"درهم: {aed}",
+        f"لیر: {lira}",
+        f"یوان: {cny}",
+        f"دلار کانادا: {cad}",
+        f"دلار استرالیا: {aud}"
+    ]
     
-    draw.text((w//2, y1), fa("💱 قیمت لحظه‌ای ارزها"), font=font_title, fill=(255, 215, 0), anchor="mm")
-    y1 += 60
-    draw.text((x_right, y1), fa(f"💵 دلار: {usd} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
-    y1 += 50
-    draw.text((x_right, y1), fa(f"💶 یورو: {eur} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
-    y1 += 50
-    draw.text((x_right, y1), fa(f"⏰ آخرین آپدیت: {t}"), font=font_small, fill=(150, 200, 255), anchor="ra")
+    y_start = h * 0.285  # شروع از بالای کادر اول
+    y_step = h * 0.039   # فاصله بین خطوط
+    x_cur_right = w * 0.43 # فاصله از سمت راست کادر ستون چپ
+    
+    for i, curr in enumerate(currencies):
+        y_pos = y_start + (i * y_step)
+        draw.text((x_cur_right, y_pos), fa(curr), font=font_text, fill=(255, 255, 255), anchor="ra")
 
-    # ------------------ کادر دوم (طلا و سکه) ------------------
-    y2 = int(h * 0.45)
-    draw.text((w//2, y2), fa("🌕 قیمت طلا و سکه"), font=font_title, fill=(255, 215, 0), anchor="mm")
-    y2 += 60
-    draw.text((x_right, y2), fa(f"🌕 طلا ۱۸ عیار: {gold18} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
-    y2 += 50
-    draw.text((x_right, y2), fa(f"🪙 سکه امامی: {coin_emami} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
+    # ۴. کادر بالا سمت راست (طلا)
+    draw.text((w * 0.91, h * 0.27), fa(f"طلا ۱۸: {gold18}"), font=font_text, fill=(255, 255, 255), anchor="ra")
 
-    # ------------------ کادر سوم (کریپتو) ------------------
-    y3 = int(h * 0.67)
-    draw.text((w//2, y3), fa("🪙 قیمت ارز دیجیتال"), font=font_title, fill=(255, 215, 0), anchor="mm")
-    y3 += 60
+    # ۵. کادر وسط سمت راست (سکه‌ها)
+    y_coin_start = h * 0.51
+    coins_list = [
+        f"امامی: {coin_emami}",
+        f"بهار: {coin_bahar}",
+        f"نیم: {coin_nim}",
+        f"ربع: {coin_rob}"
+    ]
+    for i, coin in enumerate(coins_list):
+        y_pos = y_coin_start + (i * (h * 0.035))
+        draw.text((w * 0.91, y_pos), fa(coin), font=font_text, fill=(255, 255, 255), anchor="ra")
 
-    if crypto:
-        for symbol in ["BTC", "ETH", "USDT"]:
-            if symbol in crypto:
-                draw.text((x_right, y3), fa(f"🔸 {symbol}: {crypto[symbol]} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
-                y3 += 50
-    else:
-        draw.text((x_right, y3), fa("دریافت اطلاعات با خطا مواجه شد"), font=font_text, fill=(255, 100, 100), anchor="ra")
+    # ۶. کادر پایین سمت راست (نقره - فعلا خالی می‌گذاریم)
+    # draw.text((w * 0.91, h * 0.73), fa("نقره: ..."), font=font_text, fill=(255, 255, 255), anchor="ra")
 
+    # ارسال به تلگرام
     bio = BytesIO()
     bio.name = 'summary.jpeg'
     img = img.convert("RGB")
@@ -190,7 +233,7 @@ def generate_infographic():
     return bio
 
 # ==========================================
-# ⚙️ ارسال به کانال
+# ⚙️ توابع ارسال
 # ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     _, _, _, _, t, _ = get_dates_info()
@@ -200,8 +243,6 @@ async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     aed = get_nerkh_price_safe(["aed"])
     try_price = get_nerkh_price_safe(["lira"])
     cny = get_nerkh_price_safe(["yuan"])
-    cad = get_nerkh_price_safe(["cad"])
-    aud = get_nerkh_price_safe(["aud"])
     
     msg = f"""{TEMPLATES['fiat_title']}
 ⏰ ساعت آپدیت: \u200e`{t}`
@@ -212,8 +253,6 @@ async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
 🇦🇪 درهم = \u200e`{aed}` تومان
 🇹🇷 لیر = \u200e`{try_price}` تومان
 🇨🇳 یوان = \u200e`{cny}` تومان
-🇨🇦 دلار کانادا = \u200e`{cad}` تومان
-🇦🇺 دلار استرالیا = \u200e`{aud}` تومان
 {TEMPLATES['footer']}"""
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
@@ -518,5 +557,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. کریپتو به نوبیتکس متصل شد...")
+    print("ربات روشن شد. قالب جدید و مختصات دقیق اعمال شد...")
     app.run_polling()

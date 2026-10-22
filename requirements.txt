@@ -4,3 +4,4 @@ jdatetime
 hijri-converter
 pytz
 supabase
+Pillow

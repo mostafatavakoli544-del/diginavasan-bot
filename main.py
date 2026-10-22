@@ -133,7 +133,7 @@ def create_gold_gradient(w, h):
     return base
 
 # ==========================================
-# 🎨 تابع اصلی ساخت عکس
+# 🎨 تابع ساخت عکس
 # ==========================================
 def generate_infographic():
     font_path = "vazir.ttf"
@@ -307,9 +307,9 @@ def generate_infographic():
     return bio
 
 # ==========================================
-# ⚙️ ارسال به کانال
+# ⚙️ ارسال به کانال/چت (با قابلیت تفکیک مقصد)
 # ==========================================
-async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
+async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     usd = get_nerkh_price_safe(["dollar", "usd"])
     eur = get_nerkh_price_safe(["euro", "eur"])
@@ -328,9 +328,9 @@ async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
 🇹🇷 لیر = \u200e`{try_price}` تومان
 🇨🇳 یوان = \u200e`{cny}` تومان
 {TEMPLATES['footer']}"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
 
-async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
+async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     gold18 = get_nerkh_price_safe(["gold"])
     coin_emami = get_nerkh_price_safe(["coin"])
@@ -347,9 +347,9 @@ async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
 🪙 نیم سکه = \u200e`{coin_nim}` تومان
 🪙 ربع سکه = \u200e`{coin_rob}` تومان
 {TEMPLATES['footer']}"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
 
-async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
+async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     crypto = get_crypto_prices_toman()
     
@@ -364,7 +364,7 @@ async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
         msg += "⚠️ خطا در دریافت اطلاعات\n"
         
     msg += TEMPLATES['footer']
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
 
 async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     try:
@@ -398,6 +398,7 @@ _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
     global _rotation_index
+    # توابع بدون chat_id صدا زده میشن، پس به صورت پیش‌فرض به CHANNEL_ID میرن
     jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
@@ -446,12 +447,13 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
 
+    # 🔴 در اینجا chat_id کاربر پاس داده میشه تا به چت خودش بره
     if "قیمت ارزها" in text:
-        await send_fiat_to_channel(context)
+        await send_fiat_to_channel(context, chat_id=chat_id)
     elif "قیمت طلا و سکه" in text:
-        await send_gold_to_channel(context)
+        await send_gold_to_channel(context, chat_id=chat_id)
     elif "قیمت ارز دیجیتال" in text:
-        await send_crypto_to_channel(context)
+        await send_crypto_to_channel(context, chat_id=chat_id)
     elif "ماشین‌حساب طلا" in text:
         await gold_calc_start(update, context)
     elif "دعوت از دوستان" in text:
@@ -621,5 +623,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. نسخه نهایی بدون دکمه تست...")
+    print("ربات روشن شد. تفکیک چت خصوصی از کانال انجام شد...")
     app.run_polling()

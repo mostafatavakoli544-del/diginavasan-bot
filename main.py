@@ -12,7 +12,7 @@ from bidi.algorithm import get_display
 from io import BytesIO
 from hijri_converter import convert
 from datetime import datetime, time
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, features
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
@@ -37,6 +37,10 @@ TEMPLATES = {
     "crypto_title": "🪙 **قیمت لحظه‌ای ارز دیجیتال**",
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
+
+# بررسی اینکه آیا Pillow از libraqm پشتیبانی می‌کند یا خیر
+HAS_RAQM = features.check("raqm")
+print(f"--- RTL Support (libraqm): {HAS_RAQM} ---")
 
 # ==========================================
 # ⚙️ توابع پایه
@@ -95,10 +99,9 @@ def get_crypto_prices_toman():
         return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس با دانلود خودکار فونت
+# 🎨 تابع ساخت عکس با مدیریت هوشمند فونت
 # ==========================================
 def generate_infographic():
-    # دانلود خودکار فونت از یک لینک بسیار پایدار
     font_path = "vazir.ttf"
     if not os.path.exists(font_path):
         try:
@@ -125,15 +128,17 @@ def generate_infographic():
         font_title = ImageFont.load_default()
         font_text = ImageFont.load_default()
 
-    # تابع اصلاح متن (چسباندن و راست‌چین کردن)
-    def fa(text):
-        reshaped_text = arabic_reshaper.reshape(text)
-        bidi_text = get_display(reshaped_text)
-        return bidi_text
+    def prepare_text(text):
+        if HAS_RAQM:
+            # اگر Raqm موجود باشد، نیازی به پردازش دستی نیست
+            return text
+        else:
+            # اگر Raqm نبود، باید دستی پردازش شود
+            reshaped_text = arabic_reshaper.reshape(text)
+            return get_display(reshaped_text)
 
     time_str, _ = get_dates_info()
     
-    # داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
     gbp = get_nerkh_price_safe(["pound"])
@@ -154,43 +159,61 @@ def generate_infographic():
     # ------------------ مختصات‌دهی ------------------
 
     # ۱. کادر بالا سمت چپ (عنوان)
-    draw.text((w * 0.28, h * 0.06), fa("قیمت لحظه‌ای بازار"), font=font_title, fill=(20, 30, 50), anchor="mm")
+    title_text = prepare_text("قیمت لحظه‌ای بازار")
+    if HAS_RAQM:
+        draw.text((w * 0.28, h * 0.06), title_text, font=font_title, fill=(20, 30, 50), anchor="mm", direction="rtl")
+    else:
+        draw.text((w * 0.28, h * 0.06), title_text, font=font_title, fill=(20, 30, 50), anchor="mm")
 
     # ۲. کادر بالا سمت راست (ساعت)
-    draw.text((w * 0.83, h * 0.065), fa(time_str), font=font_text, fill=(20, 30, 50), anchor="mm")
+    time_text = prepare_text(time_str)
+    if HAS_RAQM:
+        draw.text((w * 0.83, h * 0.065), time_text, font=font_text, fill=(20, 30, 50), anchor="mm", direction="rtl")
+    else:
+        draw.text((w * 0.83, h * 0.065), time_text, font=font_text, fill=(20, 30, 50), anchor="mm")
 
     # ۳. ستون بلند سمت چپ (ارزها)
     currencies = [
-        f"دلار: {usd}",
-        f"یورو: {eur}",
-        f"پوند: {gbp}",
-        f"درهم: {aed}",
-        f"لیر: {lira}",
-        f"یوان: {cny}",
-        f"دلار کانادا: {cad}",
-        f"دلار استرالیا: {aud}"
+        f"دلار: {usd}", f"یورو: {eur}", f"پوند: {gbp}", f"درهم: {aed}",
+        f"لیر: {lira}", f"یوان: {cny}", f"دلار کانادا: {cad}", f"دلار استرالیا: {aud}"
     ]
     y_start = h * 0.285
     y_step = h * 0.039
     x_cur_right = w * 0.43 
     for i, curr in enumerate(currencies):
-        draw.text((x_cur_right, y_start + (i * y_step)), fa(curr), font=font_text, fill=(255, 255, 255), anchor="ra")
+        curr_text = prepare_text(curr)
+        if HAS_RAQM:
+            draw.text((x_cur_right, y_start + (i * y_step)), curr_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
+        else:
+            draw.text((x_cur_right, y_start + (i * y_step)), curr_text, font=font_text, fill=(255, 255, 255), anchor="ra")
 
     # ۴. کادر بالا سمت راست (طلا)
-    draw.text((w * 0.91, h * 0.27), fa(f"طلا ۱۸: {gold18}"), font=font_text, fill=(255, 255, 255), anchor="ra")
+    gold_text = prepare_text(f"طلا ۱۸: {gold18}")
+    if HAS_RAQM:
+        draw.text((w * 0.91, h * 0.27), gold_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
+    else:
+        draw.text((w * 0.91, h * 0.27), gold_text, font=font_text, fill=(255, 255, 255), anchor="ra")
 
     # ۵. کادر وسط سمت راست (سکه‌ها)
     coins_list = [f"امامی: {coin_emami}", f"بهار: {coin_bahar}", f"نیم: {coin_nim}", f"ربع: {coin_rob}"]
     y_coin_start = h * 0.50
     for i, coin in enumerate(coins_list):
-        draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), fa(coin), font=font_text, fill=(255, 255, 255), anchor="ra")
+        coin_text = prepare_text(coin)
+        if HAS_RAQM:
+            draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), coin_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
+        else:
+            draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), coin_text, font=font_text, fill=(255, 255, 255), anchor="ra")
 
     # ۶. کادر پایین سمت راست (کریپتو)
     if crypto:
         crypto_list = [f"{sym}: {prc}" for sym, prc in crypto.items()]
         y_crypto_start = h * 0.73
         for i, c in enumerate(crypto_list):
-            draw.text((w * 0.91, y_crypto_start + (i * (h * 0.035))), fa(c), font=font_text, fill=(255, 255, 255), anchor="ra")
+            crypto_text = prepare_text(c)
+            if HAS_RAQM:
+                draw.text((w * 0.91, y_crypto_start + (i * (h * 0.035))), crypto_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
+            else:
+                draw.text((w * 0.91, y_crypto_start + (i * (h * 0.035))), crypto_text, font=font_text, fill=(255, 255, 255), anchor="ra")
 
     bio = BytesIO()
     bio.name = 'summary.jpeg'
@@ -517,5 +540,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم دانلود خودکار فونت و قالب جدید فعال شد...")
+    print("ربات روشن شد. سیستم مدیریت هوشمند فونت فعال شد...")
     app.run_polling()

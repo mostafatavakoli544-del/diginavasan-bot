@@ -5,3 +5,5 @@ hijri-converter
 pytz
 supabase
 Pillow
+arabic-reshaper
+python-bidi

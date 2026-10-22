@@ -38,9 +38,7 @@ TEMPLATES = {
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
 
-# بررسی اینکه آیا Pillow از libraqm پشتیبانی می‌کند یا خیر
 HAS_RAQM = features.check("raqm")
-print(f"--- RTL Support (libraqm): {HAS_RAQM} ---")
 
 # ==========================================
 # ⚙️ توابع پایه
@@ -83,7 +81,7 @@ def get_nerkh_price_safe(keys_list):
 def get_crypto_prices_toman():
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        coins = {"BTC": "btc", "ETH": "eth", "USDT": "usdt"}
+        coins = {"BTC": "btc", "ETH": "eth", "USDT": "usdt", "BNB": "bnb"}
         prices = {}
         for symbol, coin_id in coins.items():
             url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={coin_id}&dstCurrency=rls"
@@ -98,8 +96,18 @@ def get_crypto_prices_toman():
     except Exception:
         return {}
 
+def download_image(url, size=(60, 60)):
+    try:
+        response = requests.get(url, timeout=5)
+        img = Image.open(BytesIO(response.content)).convert("RGBA")
+        img = img.resize(size, Image.Resampling.LANCZOS)
+        return img
+    except Exception as e:
+        print(f"Failed to load icon: {e}")
+        return None
+
 # ==========================================
-# 🎨 تابع ساخت عکس با مدیریت هوشمند فونت
+# 🎨 تابع ساخت عکس (با لوگوها)
 # ==========================================
 def generate_infographic():
     font_path = "vazir.ttf"
@@ -122,23 +130,31 @@ def generate_infographic():
     scale = w / 1080.0
     
     try:
-        font_title = ImageFont.truetype(font_path, int(35 * scale))
-        font_text = ImageFont.truetype(font_path, int(30 * scale))
+        font_title = ImageFont.truetype(font_path, int(45 * scale))
+        font_text = ImageFont.truetype(font_path, int(28 * scale))
     except Exception:
         font_title = ImageFont.load_default()
         font_text = ImageFont.load_default()
 
-    def prepare_text(text):
+    def fa(text):
         if HAS_RAQM:
-            # اگر Raqm موجود باشد، نیازی به پردازش دستی نیست
             return text
+        reshaped_text = arabic_reshaper.reshape(text)
+        return get_display(reshaped_text)
+
+    def draw_text(text, x, y, font, color, anchor):
+        if HAS_RAQM:
+            draw.text((x, y), text, font=font, fill=color, anchor=anchor, direction="rtl")
         else:
-            # اگر Raqm نبود، باید دستی پردازش شود
-            reshaped_text = arabic_reshaper.reshape(text)
-            return get_display(reshaped_text)
+            draw.text((x, y), text, font=font, fill=color, anchor=anchor)
 
     time_str, _ = get_dates_info()
     
+    # ۱. هدر (اسم کانال و ساعت)
+    draw_text("دیجی نوسان", w * 0.35, h * 0.065, font_title, (20, 30, 50), "mm")
+    draw_text(time_str, w * 0.85, h * 0.065, font_text, (20, 30, 50), "mm")
+
+    # ۲. دریافت داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
     gbp = get_nerkh_price_safe(["pound"])
@@ -149,6 +165,7 @@ def generate_infographic():
     aud = get_nerkh_price_safe(["aud"])
     
     gold18 = get_nerkh_price_safe(["gold"])
+    gold24 = get_nerkh_price_safe(["gold24"])
     coin_emami = get_nerkh_price_safe(["coin"])
     coin_bahar = get_nerkh_price_safe(["bahar"])
     coin_nim = get_nerkh_price_safe(["half"])
@@ -156,64 +173,76 @@ def generate_infographic():
     
     crypto = get_crypto_prices_toman()
 
-    # ------------------ مختصات‌دهی ------------------
-
-    # ۱. کادر بالا سمت چپ (عنوان)
-    title_text = prepare_text("قیمت لحظه‌ای بازار")
-    if HAS_RAQM:
-        draw.text((w * 0.28, h * 0.06), title_text, font=font_title, fill=(20, 30, 50), anchor="mm", direction="rtl")
-    else:
-        draw.text((w * 0.28, h * 0.06), title_text, font=font_title, fill=(20, 30, 50), anchor="mm")
-
-    # ۲. کادر بالا سمت راست (ساعت)
-    time_text = prepare_text(time_str)
-    if HAS_RAQM:
-        draw.text((w * 0.83, h * 0.065), time_text, font=font_text, fill=(20, 30, 50), anchor="mm", direction="rtl")
-    else:
-        draw.text((w * 0.83, h * 0.065), time_text, font=font_text, fill=(20, 30, 50), anchor="mm")
-
-    # ۳. ستون بلند سمت چپ (ارزها)
+    # ۳. مختصات ستون چپ (ارزها) - ۸ ردیف
+    # لوگوها سمت چپ (x = w * 0.1)، متن سمت راست لوگو (x = w * 0.15) - راست‌چین
+    y_start_left = h * 0.22
+    y_step_left = (h * 0.72) / 8
+    
     currencies = [
-        f"دلار: {usd}", f"یورو: {eur}", f"پوند: {gbp}", f"درهم: {aed}",
-        f"لیر: {lira}", f"یوان: {cny}", f"دلار کانادا: {cad}", f"دلار استرالیا: {aud}"
+        ("us", f"دلار: {usd}"),
+        ("eu", f"یورو: {eur}"),
+        ("gb", f"پوند: {gbp}"),
+        ("ae", f"درهم: {aed}"),
+        ("tr", f"لیر: {lira}"),
+        ("cn", f"یوان: {cny}"),
+        ("ca", f"دلار کانادا: {cad}"),
+        ("au", f"دلار استرالیا: {aud}")
     ]
-    y_start = h * 0.285
-    y_step = h * 0.039
-    x_cur_right = w * 0.43 
-    for i, curr in enumerate(currencies):
-        curr_text = prepare_text(curr)
-        if HAS_RAQM:
-            draw.text((x_cur_right, y_start + (i * y_step)), curr_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
-        else:
-            draw.text((x_cur_right, y_start + (i * y_step)), curr_text, font=font_text, fill=(255, 255, 255), anchor="ra")
+    
+    for i, (country_code, text) in enumerate(currencies):
+        y_pos = y_start_left + (i * y_step_left) + (y_step_left / 2)
+        # لوگو
+        icon_url = f"https://flagcdn.com/w80/{country_code}.png"
+        icon = download_image(icon_url, size=(int(35*scale), int(35*scale)))
+        if icon:
+            # چسباندن لوگو در مرکز دایره سمت چپ
+            img.paste(icon, (int(w * 0.07), int(y_pos - (17*scale))), icon)
+        # متن راست‌چین
+        draw_text(fa(text), w * 0.45, y_pos, font_text, (255, 255, 255), "rm")
 
-    # ۴. کادر بالا سمت راست (طلا)
-    gold_text = prepare_text(f"طلا ۱۸: {gold18}")
-    if HAS_RAQM:
-        draw.text((w * 0.91, h * 0.27), gold_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
-    else:
-        draw.text((w * 0.91, h * 0.27), gold_text, font=font_text, fill=(255, 255, 255), anchor="ra")
+    # ۴. کادر بالا سمت راست (طلا و سکه) - ۶ ردیف
+    y_start_top = h * 0.22
+    y_step_top = (h * 0.32) / 6
+    # لوگوها سمت راست (x = w * 0.93)، متن راست‌چین (x = w * 0.87)
+    
+    gold_items = [
+        (f"طلا ۱۸: {gold18}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
+        (f"طلا ۲۴: {gold24}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
+        (f"سکه امامی: {coin_emami}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
+        (f"سکه بهار: {coin_bahar}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
+        (f"نیم سکه: {coin_nim}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
+        (f"ربع سکه: {coin_rob}", "https://cdn-icons-png.flaticon.com/512/217/217488.png")
+    ]
 
-    # ۵. کادر وسط سمت راست (سکه‌ها)
-    coins_list = [f"امامی: {coin_emami}", f"بهار: {coin_bahar}", f"نیم: {coin_nim}", f"ربع: {coin_rob}"]
-    y_coin_start = h * 0.50
-    for i, coin in enumerate(coins_list):
-        coin_text = prepare_text(coin)
-        if HAS_RAQM:
-            draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), coin_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
-        else:
-            draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), coin_text, font=font_text, fill=(255, 255, 255), anchor="ra")
+    for i, (text, icon_url) in enumerate(gold_items):
+        y_pos = y_start_top + (i * y_step_top) + (y_step_top / 2)
+        icon = download_image(icon_url, size=(int(30*scale), int(30*scale)))
+        if icon:
+            img.paste(icon, (int(w * 0.89), int(y_pos - (15*scale))), icon)
+        draw_text(fa(text), w * 0.85, y_pos, font_text, (255, 255, 255), "rm")
 
-    # ۶. کادر پایین سمت راست (کریپتو)
+    # ۵. کادر پایین سمت راست (کریپتو) - ۴ ردیف
+    y_start_bot = h * 0.62
+    y_step_bot = (h * 0.25) / 4
+    
+    crypto_icons = {
+        "BTC": "https://cryptologos.cc/logos/bitcoin-btc-logo.png",
+        "ETH": "https://cryptologos.cc/logos/ethereum-eth-logo.png",
+        "USDT": "https://cryptologos.cc/logos/tether-usdt-logo.png",
+        "BNB": "https://cryptologos.cc/logos/bnb-bnb-logo.png"
+    }
+
     if crypto:
-        crypto_list = [f"{sym}: {prc}" for sym, prc in crypto.items()]
-        y_crypto_start = h * 0.73
-        for i, c in enumerate(crypto_list):
-            crypto_text = prepare_text(c)
-            if HAS_RAQM:
-                draw.text((w * 0.91, y_crypto_start + (i * (h * 0.035))), crypto_text, font=font_text, fill=(255, 255, 255), anchor="ra", direction="rtl")
-            else:
-                draw.text((w * 0.91, y_crypto_start + (i * (h * 0.035))), crypto_text, font=font_text, fill=(255, 255, 255), anchor="ra")
+        crypto_items = [(f"{sym}: {prc}", crypto_icons.get(sym, crypto_icons["BTC"])) for sym, prc in crypto.items()]
+    else:
+        crypto_items = [("خطا در دریافت", crypto_icons["BTC"])]
+
+    for i, (text, icon_url) in enumerate(crypto_items):
+        y_pos = y_start_bot + (i * y_step_bot) + (y_step_bot / 2)
+        icon = download_image(icon_url, size=(int(30*scale), int(30*scale)))
+        if icon:
+            img.paste(icon, (int(w * 0.89), int(y_pos - (15*scale))), icon)
+        draw_text(fa(text), w * 0.85, y_pos, font_text, (255, 255, 255), "rm")
 
     bio = BytesIO()
     bio.name = 'summary.jpeg'
@@ -540,5 +569,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم مدیریت هوشمند فونت فعال شد...")
+    print("ربات روشن شد. سیستم لوگو و قالب جدید فعال شد...")
     app.run_polling()

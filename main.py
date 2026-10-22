@@ -82,67 +82,62 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
-# API جدید و پایدار برای کریپتو (CoinPaprika)
+# استفاده از نوبیتکس برای دریافت قیمت کریپتو (بدون بلاک شدن)
 def get_crypto_prices_toman():
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         coins = {
-            "BTC": "btc-bitcoin",
-            "ETH": "eth-ethereum",
-            "USDT": "usdt-tether",
-            "BNB": "bnb-binance-coin",
-            "SOL": "sol-solana",
-            "XRP": "xrp-xrp",
-            "DOGE": "doge-dogecoin"
+            "BTC": "btc",
+            "ETH": "eth",
+            "USDT": "usdt",
+            "BNB": "bnb",
+            "SOL": "sol",
+            "XRP": "xrp",
+            "DOGE": "doge"
         }
         
-        usd_str = get_nerkh_price_safe(["dollar", "usd"])
-        usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
-        
-        if usd_float <= 0:
-            return {}
-            
         prices = {}
         for symbol, coin_id in coins.items():
-            url = f"https://api.coinpaprika.com/v1/tickers/{coin_id}"
+            url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={coin_id}&dstCurrency=rls"
             res = requests.get(url, headers=headers, timeout=5)
             if res.status_code == 200:
-                usd_val = float(res.json()['quotes']['USD']['price'])
-                prices[symbol] = f"{int(usd_val * usd_float):,.0f}"
+                data = res.json()
+                key = f"{coin_id}-rls"
+                if 'stats' in data and key in data['stats']:
+                    price_toman = int(float(data['stats'][key]['latest']) / 10)
+                    prices[symbol] = f"{price_toman:,.0f}"
         return prices
     except Exception as e:
         print(f"Crypto error: {e}")
         return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس با قالب جدید و متن راست‌چین
+# 🎨 تابع ساخت عکس
 # ==========================================
 def generate_infographic():
     try:
         img = Image.open("template.jpg").convert("RGBA")
     except Exception as e:
-        print(f"Template not found: {e}")
+        print(f"Template not found, using solid color: {e}")
         img = Image.new('RGB', (1080, 1920), color=(15, 25, 45))
     
     draw = ImageDraw.Draw(img)
     
+    # تلاش برای لود فونت
     try:
         font_title = ImageFont.truetype("font.ttf", 45)
-        font_text = ImageFont.truetype("font.ttf", 38)
-        font_small = ImageFont.truetype("font.ttf", 30)
-    except:
+        font_text = ImageFont.truetype("font.ttf", 35)
+        font_small = ImageFont.truetype("font.ttf", 25)
+    except Exception as e:
+        print(f"Font load error: {e}")
         font_title = ImageFont.load_default()
         font_text = ImageFont.load_default()
         font_small = ImageFont.load_default()
 
     # تابع اصلاح متن فارسی
     def fa(text):
-        try:
-            reshaped_text = arabic_reshaper.reshape(text)
-            bidi_text = get_display(reshaped_text)
-            return bidi_text
-        except:
-            return text
+        reshaped_text = arabic_reshaper.reshape(text)
+        return get_display(reshaped_text)
 
     day, shamsi, _, _, t, _ = get_dates_info()
     
@@ -523,5 +518,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. تصحیح متن فارسی و کریپتو...")
+    print("ربات روشن شد. کریپتو به نوبیتکس متصل شد...")
     app.run_polling()

@@ -103,11 +103,37 @@ def download_image(url, size=(60, 60)):
         img = img.resize(size, Image.Resampling.LANCZOS)
         return img
     except Exception as e:
-        print(f"Failed to load icon: {e}")
         return None
 
 # ==========================================
-# 🎨 تابع ساخت عکس (اصلاح دقیق مختصات و سایز فونت)
+# 🎨 توابع کمکی برای افکت‌های گرافیکی
+# ==========================================
+def create_gradient_bg(w, h):
+    base = Image.new('RGB', (w, h), (15, 25, 45))
+    top_color = (15, 25, 45)
+    bottom_color = (5, 10, 20)
+    draw = ImageDraw.Draw(base)
+    for y in range(h):
+        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * y / h)
+        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * y / h)
+        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * y / h)
+        draw.line([(0, y), (w, y)], fill=(r, g, b))
+    return base
+
+def create_gold_gradient(w, h):
+    base = Image.new('RGB', (w, h))
+    draw = ImageDraw.Draw(base)
+    left_color = (218, 165, 32) 
+    right_color = (184, 134, 11) 
+    for x in range(w):
+        r = int(left_color[0] + (right_color[0] - left_color[0]) * x / w)
+        g = int(left_color[1] + (right_color[1] - left_color[1]) * x / w)
+        b = int(left_color[2] + (right_color[2] - left_color[2]) * x / w)
+        draw.line([(x, 0), (x, h)], fill=(r, g, b))
+    return base
+
+# ==========================================
+# 🎨 تابع اصلی ساخت عکس
 # ==========================================
 def generate_infographic():
     font_path = "vazir.ttf"
@@ -118,48 +144,37 @@ def generate_infographic():
             with open(font_path, 'wb') as f:
                 f.write(r.content)
         except Exception as e:
-            print(f"Font download failed: {e}")
+            pass
 
-    try:
-        img = Image.open("template.jpg").convert("RGBA")
-    except Exception:
-        img = Image.new('RGB', (1080, 1920), color=(15, 25, 45))
-    
-    draw = ImageDraw.Draw(img)
-    w, h = img.size
+    w, h = 1080, 1920
     scale = w / 1080.0
+
+    img = create_gradient_bg(w, h).convert("RGBA")
+    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
     
     try:
         font_title = ImageFont.truetype(font_path, int(45 * scale))
-        # فونت ستون چپ (ارزها) بزرگتر
-        font_text_left = ImageFont.truetype(font_path, int(34 * scale)) 
-        # فونت ستون راست (طلا و کریپتو) کمی کوچکتر برای جلوگیری از تداخل
-        font_text_right = ImageFont.truetype(font_path, int(28 * scale))
+        font_text_left = ImageFont.truetype(font_path, int(32 * scale)) 
+        font_text_right = ImageFont.truetype(font_path, int(30 * scale))
     except Exception:
         font_title = ImageFont.load_default()
         font_text_left = ImageFont.load_default()
         font_text_right = ImageFont.load_default()
 
     def fa(text):
-        if HAS_RAQM:
-            return text
-        reshaped_text = arabic_reshaper.reshape(text)
-        return get_display(reshaped_text)
+        if HAS_RAQM: return text
+        return get_display(arabic_reshaper.reshape(text))
 
-    # استروک مشکی برای خوانایی روی هر پس‌زمینه‌ای
-    def draw_text(text, x, y, font, color, anchor):
+    def draw_text(text, x, y, font, color, anchor, stroke=True):
+        sw = 1 if stroke else 0
         if HAS_RAQM:
-            draw.text((x, y), text, font=font, fill=color, anchor=anchor, direction="rtl", stroke_width=1, stroke_fill=(0,0,0))
+            draw.text((x, y), text, font=font, fill=color, anchor=anchor, direction="rtl", stroke_width=sw, stroke_fill=(0,0,0))
         else:
-            draw.text((x, y), text, font=font, fill=color, anchor=anchor, stroke_width=1, stroke_fill=(0,0,0))
+            draw.text((x, y), text, font=font, fill=color, anchor=anchor, stroke_width=sw, stroke_fill=(0,0,0))
 
     time_str, _ = get_dates_info()
     
-    # ۱. هدر (اسم کانال و ساعت) - ساعت کمی پایین‌تر و چپ‌تر رفت تا روی خط طلایی نیفته
-    draw_text("دیجی نوسان", w * 0.35, h * 0.065, font_title, (20, 30, 50), "mm")
-    draw_text(time_str, w * 0.82, h * 0.065, font_text_right, (20, 30, 50), "mm")
-
-    # ۲. دریافت داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
     gbp = get_nerkh_price_safe(["pound"])
@@ -180,54 +195,79 @@ def generate_infographic():
 
     icon_size = int(32 * scale)
 
-    # ۳. ستون چپ (ارزها)
-    y_start_left = h * 0.23
-    y_step_left = (h * 0.69) / 8
+    header_bg = create_gold_gradient(w-80, 120)
+    mask = Image.new('L', (w-80, 120), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle([(0, 0), (w-80, 120)], radius=20, fill=255)
+    img.paste(header_bg, (40, 40), mask)
+    draw.rounded_rectangle([(40, 40), (w-40, 160)], radius=20, outline=(255, 215, 0), width=3)
+    
+    draw_text("دیجی نوسان", w * 0.35, h * 0.05, font_title, (20, 30, 50), "mm", stroke=False)
+    draw_text(time_str, w * 0.82, h * 0.05, font_text_right, (20, 30, 50), "mm", stroke=False)
+
+    draw.rounded_rectangle([(45, 225), (485, 1855)], radius=30, fill=(0, 0, 0, 80)) 
+    draw.rounded_rectangle([(525, 225), (1045, 905)], radius=30, fill=(0, 0, 0, 80)) 
+    draw.rounded_rectangle([(525, 945), (1045, 1855)], radius=30, fill=(0, 0, 0, 80)) 
+    
+    draw.rounded_rectangle([(40, 220), (480, 1850)], radius=30, fill=(255, 255, 255, 15), outline=(200, 160, 70, 200), width=2)
+    draw.rounded_rectangle([(520, 220), (1040, 900)], radius=30, fill=(255, 255, 255, 15), outline=(200, 160, 70, 200), width=2)
+    draw.rounded_rectangle([(520, 940), (1040, 1850)], radius=30, fill=(255, 255, 255, 15), outline=(200, 160, 70, 200), width=2)
+
+    y_start_left = 280
+    y_step_left = (1850 - 280) / 8
     
     currencies = [
-        ("us", f"دلار: {usd}"),
-        ("eu", f"یورو: {eur}"),
-        ("gb", f"پوند: {gbp}"),
-        ("ae", f"درهم: {aed}"),
-        ("tr", f"لیر: {lira}"),
-        ("cn", f"یوان: {cny}"),
-        ("ca", f"دلار کانادا: {cad}"),
-        ("au", f"دلار استرالیا: {aud}")
+        ("us", f"دلار: {usd}"), ("eu", f"یورو: {eur}"), ("gb", f"پوند: {gbp}"), ("ae", f"درهم: {aed}"),
+        ("tr", f"لیر: {lira}"), ("cn", f"یوان: {cny}"), ("ca", f"دلار کانادا: {cad}"), ("au", f"دلار استرالیا: {aud}")
     ]
     
     for i, (country_code, text) in enumerate(currencies):
         y_pos = y_start_left + (i * y_step_left) + (y_step_left / 2)
-        icon_url = f"https://flagcdn.com/w80/{country_code}.png"
-        icon = download_image(icon_url, size=(icon_size, icon_size))
+        
+        if i > 0:
+            draw.line([(80, y_pos - y_step_left/2), (440, y_pos - y_step_left/2)], fill=(200, 160, 70, 50), width=1)
+        
+        draw.ellipse([(100 - icon_size, y_pos - icon_size), (100 + icon_size, y_pos + icon_size)], fill=(255, 255, 255, 10))
+        
+        icon = download_image(f"https://flagcdn.com/w80/{country_code}.png", size=(icon_size, icon_size))
         if icon:
-            img.paste(icon, (int(w * 0.08) - icon_size//2, int(y_pos) - icon_size//2), icon)
-        draw_text(fa(text), w * 0.44, y_pos, font_text_left, (255, 255, 255), "rm")
+            img.paste(icon, (int(100) - icon_size//2, int(y_pos) - icon_size//2), icon)
+        
+        parts = text.split(':')
+        name, price = parts[0], parts[1]
+        draw_text(fa(f"{name}:"), 440, y_pos, font_text_left, (200, 200, 200), "rm")
+        draw_text(fa(price.strip()), 440 - draw.textlength(fa(f"{name}:"), font=font_text_left) - 20, y_pos, font_text_left, (255, 215, 0), "rm")
 
-    # ۴. کادر بالا سمت راست (طلا و سکه)
-    y_start_top = h * 0.23
-    y_step_top = (h * 0.32) / 6
+    y_start_top = 280
+    y_step_top = (900 - 280) / 6
     
     gold_items = [
-        (f"طلا ۱۸: {gold18}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
-        (f"طلا ۲۴: {gold24}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
-        (f"سکه امامی: {coin_emami}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
-        (f"سکه بهار: {coin_bahar}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
-        (f"نیم سکه: {coin_nim}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
-        (f"ربع سکه: {coin_rob}", "https://cdn-icons-png.flaticon.com/512/217/217488.png")
+        (f"طلا ۱۸", f"{gold18}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
+        (f"طلا ۲۴", f"{gold24}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
+        (f"سکه امامی", f"{coin_emami}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
+        (f"سکه بهار", f"{coin_bahar}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
+        (f"نیم سکه", f"{coin_nim}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
+        (f"ربع سکه", f"{coin_rob}", "https://cdn-icons-png.flaticon.com/512/217/217488.png")
     ]
 
-    for i, (text, icon_url) in enumerate(gold_items):
+    for i, (name, price, icon_url) in enumerate(gold_items):
         y_pos = y_start_top + (i * y_step_top) + (y_step_top / 2)
+        
+        if i > 0:
+            draw.line([(560, y_pos - y_step_top/2), (1000, y_pos - y_step_top/2)], fill=(200, 160, 70, 50), width=1)
+            
+        draw.ellipse([(980 - icon_size, y_pos - icon_size), (980 + icon_size, y_pos + icon_size)], fill=(255, 255, 255, 10))
+        
         icon = download_image(icon_url, size=(icon_size, icon_size))
         if icon:
-            img.paste(icon, (int(w * 0.90) - icon_size//2, int(y_pos) - icon_size//2), icon)
+            img.paste(icon, (int(980) - icon_size//2, int(y_pos) - icon_size//2), icon)
         
-        # متن به سمت چپ‌تر منتقل شد (w*0.82) تا با دایره‌ها تداخل نداشته باشه
-        draw_text(fa(text), w * 0.82, y_pos, font_text_right, (255, 255, 255), "rm")
+        draw_text(fa(f"{name}:"), 940, y_pos, font_text_right, (200, 200, 200), "rm")
+        name_width = draw.textlength(fa(f"{name}:"), font=font_text_right)
+        draw_text(fa(price), 940 - name_width - 20, y_pos, font_text_right, (255, 215, 0), "rm")
 
-    # ۵. کادر پایین سمت راست (کریپتو)
-    y_start_bot = h * 0.62
-    y_step_bot = (h * 0.25) / 4
+    y_start_bot = 1000
+    y_step_bot = (1850 - 1000) / 4
     
     crypto_icons = {
         "BTC": "https://cryptologos.cc/logos/bitcoin-btc-logo.png",
@@ -237,23 +277,32 @@ def generate_infographic():
     }
 
     if crypto:
-        crypto_items = [(f"{sym}: {prc}", crypto_icons.get(sym, crypto_icons["BTC"])) for sym, prc in crypto.items()]
+        crypto_items = [(sym, prc, crypto_icons.get(sym, crypto_icons["BTC"])) for sym, prc in crypto.items()]
     else:
-        crypto_items = [("خطا در دریافت", crypto_icons["BTC"])]
+        crypto_items = [("خطا", "دریافت", crypto_icons["BTC"])]
 
-    for i, (text, icon_url) in enumerate(crypto_items):
+    for i, (name, price, icon_url) in enumerate(crypto_items):
         y_pos = y_start_bot + (i * y_step_bot) + (y_step_bot / 2)
+        
+        if i > 0:
+            draw.line([(560, y_pos - y_step_bot/2), (1000, y_pos - y_step_bot/2)], fill=(200, 160, 70, 50), width=1)
+            
+        draw.ellipse([(980 - icon_size, y_pos - icon_size), (980 + icon_size, y_pos + icon_size)], fill=(255, 255, 255, 10))
+        
         icon = download_image(icon_url, size=(icon_size, icon_size))
         if icon:
-            img.paste(icon, (int(w * 0.90) - icon_size//2, int(y_pos) - icon_size//2), icon)
+            img.paste(icon, (int(980) - icon_size//2, int(y_pos) - icon_size//2), icon)
         
-        # متن به سمت چپ‌تر منتقل شد (w*0.82)
-        draw_text(fa(text), w * 0.82, y_pos, font_text_right, (255, 255, 255), "rm")
+        draw_text(fa(f"{name}:"), 940, y_pos, font_text_right, (200, 200, 200), "rm")
+        name_width = draw.textlength(fa(f"{name}:"), font=font_text_right)
+        draw_text(fa(price), 940 - name_width - 20, y_pos, font_text_right, (255, 215, 0), "rm")
 
+    final_img = Image.alpha_composite(img, overlay)
+    
     bio = BytesIO()
     bio.name = 'summary.jpeg'
-    img = img.convert("RGB")
-    img.save(bio, 'JPEG', quality=95)
+    final_img = final_img.convert("RGB")
+    final_img.save(bio, 'JPEG', quality=95)
     bio.seek(0)
     return bio
 
@@ -318,13 +367,16 @@ async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
-    img_bio = generate_infographic()
-    await context.bot.send_photo(
-        chat_id=chat_id, 
-        photo=img_bio, 
-        caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan",
-        parse_mode='Markdown'
-    )
+    try:
+        img_bio = generate_infographic()
+        await context.bot.send_photo(
+            chat_id=chat_id, 
+            photo=img_bio, 
+            caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan",
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        print(f"❌ خطای فنی: {e}")
 
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     msg = f"""🌅 **بسم الله الرحمن الرحیم**
@@ -351,15 +403,11 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     _rotation_index += 1
     await current_job(context)
 
-# ==========================================
-# ⚙️ منوی اصلی
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🖼️ تست عکس (TEMP)")],
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -380,7 +428,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             invite_count = response.data[0].get('invite_count', 0)
     except Exception as e:
-        print(f"DB Error: {e}")
+        pass
 
     welcome_msg = f"""سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅
 
@@ -404,8 +452,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_gold_to_channel(context)
     elif "قیمت ارز دیجیتال" in text:
         await send_crypto_to_channel(context)
-    elif "تست عکس" in text:
-        await send_image_summary_to_channel(context, chat_id=chat_id)
     elif "ماشین‌حساب طلا" in text:
         await gold_calc_start(update, context)
     elif "دعوت از دوستان" in text:
@@ -444,7 +490,7 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=reply_markup)
         except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ خطای فنی: {e}")
+            pass
 
 # ==========================================
 # 🧮 ماشین‌حساب طلا
@@ -560,7 +606,7 @@ if __name__ == '__main__':
         },
         fallbacks=[
             CommandHandler('cancel', cancel),
-            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🖼️ تست عکس \\(TEMP\\))$"), handle_menu_text)
+            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)
         ],
         allow_reentry=True
     )
@@ -575,5 +621,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. فونت‌ها و مختصات برای آخرین بار اصلاح شد...")
+    print("ربات روشن شد. نسخه نهایی بدون دکمه تست...")
     app.run_polling()

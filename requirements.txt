@@ -1,10 +1,9 @@
 python-telegram-bot[passport,job-queue]
 requests
+pytz
 jdatetime
 hijri-converter
-pytz
 supabase
 Pillow
 arabic-reshaper
 python-bidi
-pictex

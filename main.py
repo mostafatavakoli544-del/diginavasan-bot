@@ -41,7 +41,7 @@ TEMPLATES = {
 HAS_RAQM = features.check("raqm")
 
 # ==========================================
-# 📊 تابع جدید: ثبت رفتار کاربر در دیتابیس (بدون metadata)
+# 📊 تابع ثبت رفتار کاربر در دیتابیس (اصلاح‌شده)
 # ==========================================
 def log_event(user_id, event_name):
     try:
@@ -49,9 +49,20 @@ def log_event(user_id, event_name):
             "user_id": user_id,
             "event_name": event_name
         }
-        supabase.table('user_events').insert(data).execute()
+        result = supabase.table('user_events').insert(data).execute()
+        return True
     except Exception as e:
-        print(f"Error logging event: {e}")
+        error_msg = f"❌ خطای ثبت لاگ: {e}"
+        print(error_msg)
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                data={"chat_id": ADMIN_ID, "text": error_msg[:1000]},
+                timeout=5
+            )
+        except Exception:
+            pass
+        return False
 
 # ==========================================
 # ⚙️ توابع پایه
@@ -307,7 +318,7 @@ def generate_infographic():
             img.paste(icon, (int(980) - icon_size//2, int(y_pos) - icon_size//2), icon)
         
         draw_text(fa(f"{name}:"), 940, y_pos, font_text_right, (200, 200, 200), "rm")
-        name_width = draw.textlength(fa(f"{name}:"), font_text_right)
+        name_width = draw.textlength(fa(f"{name}:"), font=font_text_right)
         draw_text(fa(price), 940 - name_width - 20, y_pos, font_text_right, (255, 215, 0), "rm")
 
     final_img = Image.alpha_composite(img, overlay)

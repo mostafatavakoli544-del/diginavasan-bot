@@ -7,3 +7,4 @@ supabase
 Pillow
 arabic-reshaper
 python-bidi
+pictex

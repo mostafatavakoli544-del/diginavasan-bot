@@ -7,8 +7,10 @@ import socketserver
 import pytz
 import jdatetime
 import urllib.parse
+from io import BytesIO
 from hijri_converter import convert
 from datetime import datetime, time
+from PIL import Image, ImageDraw, ImageFont
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
@@ -22,16 +24,17 @@ TOKEN = os.environ.get("BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 CHANNEL_ID = "@diginavasan"
 ADMIN_ID = 718840144
+OIL_API_KEY = os.environ.get("OIL_API_KEY", "") # کلید رایگان OilPriceAPI را اینجا یا در Render تنظیم کن
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 TEMPLATES = {
-    "fiat_title": "💱 **قیمت لحظه‌ای ارزها**",
-    "gold_title": "🌕 **قیمت لحظه‌ای طلا و سکه**",
-    "crypto_title": "🪙 **قیمت لحظه‌ای ارز دیجیتال**",
-    "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
+    "fiat_title": "💱 قیمت لحظه‌ای ارزها",
+    "gold_title": "🌕 قیمت لحظه‌ای طلا و سکه",
+    "crypto_title": "🪙 قیمت لحظه‌ای ارز دیجیتال",
+    "footer": "\n💰 قیمت لحظه‌ای دیجی نوسان 👇\n@diginavasan"
 }
 
 # ==========================================
@@ -78,142 +81,189 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
-def get_crypto_prices_toman(usd_price_float):
-    if usd_price_float <= 0:
-        return "نامشخص", "نامشخص", "نامشخص"
-    
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
+def get_crypto_prices_toman():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether&vs_currencies=usd"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        # لیست گسترده‌تر ارزهای دیجیتال
+        ids = "bitcoin,ethereum,tether,binancecoin,solana,ripple,dogecoin"
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
             data = res.json()
-            btc = int(data['bitcoin']['usd'] * usd_price_float)
-            eth = int(data['ethereum']['usd'] * usd_price_float)
-            usdt = int(data['tether']['usd'] * usd_price_float)
-            return f"{btc:,.0f}", f"{eth:,.0f}", f"{usdt:,.0f}"
-    except Exception:
-        pass
-
-    try:
-        def get_paprika(coin_id):
-            url = f"https://api.coinpaprika.com/v1/tickers/{coin_id}"
-            res = requests.get(url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                return float(res.json()['quotes']['USD']['price'])
-            return 0
+            usd_str = get_nerkh_price_safe(["dollar", "usd"])
+            usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
             
-        btc_usd = get_paprika("btc-bitcoin")
-        eth_usd = get_paprika("eth-ethereum")
-        usdt_usd = get_paprika("usdt-tether")
-        
-        if btc_usd > 0:
-            btc = int(btc_usd * usd_price_float)
-            eth = int(eth_usd * usd_price_float)
-            usdt = int(usdt_usd * usd_price_float)
-            return f"{btc:,.0f}", f"{eth:,.0f}", f"{usdt:,.0f}"
+            if usd_float > 0:
+                prices = {}
+                for coin_id, coin_name in [("bitcoin", "BTC"), ("ethereum", "ETH"), ("tether", "USDT"), 
+                                           ("binancecoin", "BNB"), ("solana", "SOL"), ("ripple", "XRP"), ("dogecoin", "DOGE")]:
+                    usd_val = data[coin_id]['usd']
+                    prices[coin_name] = f"{int(usd_val * usd_float):,.0f}"
+                return prices
+    except Exception as e:
+        print(f"Crypto error: {e}")
+    return {}
+
+def get_oil_price():
+    if not OIL_API_KEY:
+        return "کلید API نفت تنظیم نشده"
+    try:
+        headers = {'Authorization': f'Token {OIL_API_KEY}'}
+        url = "https://api.oilpriceapi.com/v1/prices/latest?by_code=BRENT_CRUDE_USD"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            return f"${data['data']['price']:.2f}"
+        return "خطا در دریافت"
     except Exception:
-        pass
-
-    return "خطا", "خطا", "خطا"
+        return "خطا"
 
 # ==========================================
-# ⚙️ ساخت پیام‌ها
+# 🎨 تابع ساخت عکس اینفوگرافیک
 # ==========================================
-def generate_fiat_msg():
-    _, _, _, _, t, _ = get_dates_info()
+def generate_infographic(title, data_lines):
+    # ابعاد عکس (مناسب تلگرام)
+    width, height = 800, 600
+    # رنگ‌ها
+    bg_color = (15, 25, 45) # سرمه‌ای تیره
+    title_color = (255, 215, 0) # طلایی
+    text_color = (255, 255, 255) # سفید
+    accent_color = (50, 150, 255) # آبی
+    
+    img = Image.new('RGB', (width, height), color=bg_color)
+    draw = ImageDraw.Draw(img)
+    
+    # تلاش برای استفاده از فونت پیش‌فرض یا فونت فارسی (در صورت وجود)
+    try:
+        # در صورت آپلود فونت فارسی مثل Vazirmatn، مسیر آن را اینجا بده
+        font_title = ImageFont.truetype("arial.ttf", 40) 
+        font_text = ImageFont.truetype("arial.ttf", 30)
+    except IOError:
+        font_title = ImageFont.load_default()
+        font_text = ImageFont.load_default()
+
+    # رسم خط بالایی (تزئینی)
+    draw.line([(50, 50), (width-50, 50)], fill=accent_color, width=3)
+    
+    # نوشتن تایتل
+    draw.text((50, 70), title, font=font_title, fill=title_color)
+    
+    # نوشتن تاریخ
+    _, _, _, greg, t, _ = get_dates_info()
+    draw.text((50, 130), f"⏰ آخرین آپدیت: {t}", font=font_text, fill=accent_color)
+    
+    # رسم خطوط داده‌ها
+    y_offset = 200
+    for line in data_lines:
+        draw.text((50, y_offset), line, font=font_text, fill=text_color)
+        y_offset += 45
+        
+    # رسم فوتر
+    draw.line([(50, height-80), (width-50, height-80)], fill=accent_color, width=3)
+    draw.text((50, height-60), "@diginavasan | دیجی نوسان", font=font_text, fill=title_color)
+    
+    # ذخیره در حافظه
+    bio = BytesIO()
+    bio.name = 'infographic.jpeg'
+    img.save(bio, 'JPEG')
+    bio.seek(0)
+    return bio
+
+# ==========================================
+# ⚙️ ارسال به کانال (متنی و عکسی)
+# ==========================================
+async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     usd = get_nerkh_price_safe(["dollar", "usd"])
     eur = get_nerkh_price_safe(["euro", "eur"])
     gbp = get_nerkh_price_safe(["pound", "gbp"])
     aed = get_nerkh_price_safe(["aed"])
     try_price = get_nerkh_price_safe(["lira"])
     cny = get_nerkh_price_safe(["yuan"])
+    cad = get_nerkh_price_safe(["cad"])
+    aud = get_nerkh_price_safe(["aud"])
+    jpy = get_nerkh_price_safe(["jpy"])
     
-    return f"""{TEMPLATES['fiat_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
+    lines = [
+        f"💵 دلار: {usd} تومان",
+        f"💶 یورو: {eur} تومان",
+        f"💷 پوند: {gbp} تومان",
+        f"🇦🇪 درهم: {aed} تومان",
+        f"🇹🇷 لیر: {try_price} تومان",
+        f"🇨🇳 یوان: {cny} تومان",
+        f"🇨🇦 دلار کانادا: {cad} تومان",
+        f"🇦🇺 دلار استرالیا: {aud} تومان",
+    ]
+    
+    # ارسال عکس
+    img_bio = generate_infographic("💱 قیمت لحظه‌ای ارزها", lines)
+    await context.bot.send_photo(chat_id=CHANNEL_ID, photo=img_bio, caption="📊 @diginavasan")
 
-💵 دلار = \u200e`{usd}` تومان
-💶 یورو = \u200e`{eur}` تومان
-💷 پوند = \u200e`{gbp}` تومان
-🇦🇪 درهم = \u200e`{aed}` تومان
-🇹🇷 لیر = \u200e`{try_price}` تومان
-🇨🇳 یوان = \u200e`{cny}` تومان
-{TEMPLATES['footer']}"""
-
-def generate_gold_msg():
-    _, _, _, _, t, _ = get_dates_info()
+async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
     gold18 = get_nerkh_price_safe(["gold"])
     coin_emami = get_nerkh_price_safe(["coin"])
     coin_bahar = get_nerkh_price_safe(["bahar"])
     coin_nim = get_nerkh_price_safe(["half"])
     coin_rob = get_nerkh_price_safe(["quarter"])
     
-    return f"""{TEMPLATES['gold_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
-
-🌕 طلا ۱۸ عیار = \u200e`{gold18}` تومان
-🪙 سکه امامی = \u200e`{coin_emami}` تومان
-🪙 سکه بهار = \u200e`{coin_bahar}` تومان
-🪙 نیم سکه = \u200e`{coin_nim}` تومان
-🪙 ربع سکه = \u200e`{coin_rob}` تومان
-{TEMPLATES['footer']}"""
-
-def generate_crypto_msg():
-    _, _, _, _, t, _ = get_dates_info()
-    usd_str = get_nerkh_price_safe(["dollar", "usd"])
-    usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
+    lines = [
+        f"🌕 طلا ۱۸ عیار: {gold18} تومان",
+        f"🪙 سکه امامی: {coin_emami} تومان",
+        f"🪙 سکه بهار: {coin_bahar} تومان",
+        f"🪙 نیم سکه: {coin_nim} تومان",
+        f"🪙 ربع سکه: {coin_rob} تومان",
+    ]
     
-    btc, eth, usdt = get_crypto_prices_toman(usd_float)
-    
-    return f"""{TEMPLATES['crypto_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
-
-🟠 بیت‌کوین (BTC) = \u200e`{btc}` تومان
-🔷 اتریوم (ETH) = \u200e`{eth}` تومان
-🟢 تتر (USDT) = \u200e`{usdt}` تومان
-{TEMPLATES['footer']}"""
-
-# ==========================================
-# ⚙️ ارسال خودکار به کانال
-# ==========================================
-async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_fiat_msg(), parse_mode='Markdown')
-
-async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_gold_msg(), parse_mode='Markdown')
+    img_bio = generate_infographic("🌕 قیمت لحظه‌ای طلا و سکه", lines)
+    await context.bot.send_photo(chat_id=CHANNEL_ID, photo=img_bio, caption="📊 @diginavasan")
 
 async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=generate_crypto_msg(), parse_mode='Markdown')
+    crypto_prices = get_crypto_prices_toman()
+    lines = []
+    if crypto_prices:
+        for symbol, price in crypto_prices.items():
+            lines.append(f"🪙 {symbol}: {price} تومان")
+    else:
+        lines.append("⚠️ خطا در دریافت قیمت ارزهای دیجیتال")
+        
+    img_bio = generate_infographic("🪙 قیمت لحظه‌ای ارز دیجیتال", lines)
+    await context.bot.send_photo(chat_id=CHANNEL_ID, photo=img_bio, caption="📊 @diginavasan")
+
+async def send_oil_to_channel(context: ContextTypes.DEFAULT_TYPE):
+    oil_price = get_oil_price()
+    lines = [f"🛢 نفت برنت: {oil_price} دلار"]
+    
+    img_bio = generate_infographic("🛢 قیمت نفت", lines)
+    await context.bot.send_photo(chat_id=CHANNEL_ID, photo=img_bio, caption="📊 @diginavasan")
 
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE):
     day, shamsi, hijri, greg, t, _ = get_dates_info()
-    msg = f"""🌅 **بسم الله الرحمن الرحیم**
+    msg = f"""🌅 <b>بسم الله الرحمن الرحیم</b>
 صبح بخیر! بازار امروز آغاز شد. ☀️
 
-📅 امروز: **{day}**
-🗓 شمسی: \u200e`{shamsi}`
-🌙 قمری: \u200e`{hijri}`
-📆 میلادی: \u200e`{greg}`
-⏰ ساعت: \u200e`{t}`
+📅 امروز: <b>{day}</b>
+🗓 شمسی: {shamsi}
+🌙 قمری: {hijri}
+📆 میلادی: {greg}
+⏰ ساعت: {t}
 
-*💰 دیجی نوسان 👇*
+💰 دیجی نوسان 👇
 @diginavasan"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='HTML')
 
 async def send_night_message(context: ContextTypes.DEFAULT_TYPE):
-    msg = f"""🌙 **پایان نرخ بازار**
+    msg = f"""🌙 <b>پایان نرخ بازار</b>
 بازار تعطیل شد. شب خوبی رو برای شما و خانواده‌تون آرزو می‌کنیم. 🌹
 
-*💰 دیجی نوسان 👇*
+💰 دیجی نوسان 👇
 @diginavasan"""
-    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
+    await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='HTML')
 
 _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
     global _rotation_index
-    jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel]
+    # چرخش بین ۴ تصویر
+    jobs = [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_oil_to_channel]
     current_job = jobs[_rotation_index % len(jobs)]
     _rotation_index += 1
     await current_job(context)
@@ -237,40 +287,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     invite_count = 0
     try:
         response = supabase.table('users').select('*').eq('user_id', user_id).execute()
-        
         if not response.data:
             invited_by = None
             if context.args:
-                try:
-                    invited_by = int(context.args[0])
-                except ValueError:
-                    pass
-            
+                try: invited_by = int(context.args[0])
+                except ValueError: pass
             supabase.table('users').insert({"user_id": user_id, "invited_by": invited_by}).execute()
-            
-            if invited_by:
-                inviter_res = supabase.table('users').select('invite_count').eq('user_id', invited_by).execute()
-                if inviter_res.data:
-                    new_count = inviter_res.data[0]['invite_count'] + 1
-                    supabase.table('users').update({"invite_count": new_count}).eq('user_id', invited_by).execute()
-                    try:
-                        await context.bot.send_message(chat_id=invited_by, text=f"🎉 یک کاربر جدید با لینک شما به ربات پیوست!\nتعداد کل دعوت‌های شما: {new_count}")
-                    except:
-                        pass
         else:
             invite_count = response.data[0].get('invite_count', 0)
     except Exception as e:
         print(f"DB Error: {e}")
 
-    welcome_msg = f"""سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅
+    welcome_msg = f"""سلام <b>{first_name}</b> عزیز! به ربات دیجی نوسان خوش آمدید. ✅
 
-👥 تعداد دعوت‌های شما تاکنون: **{invite_count}** نفر
+👥 تعداد دعوت‌های شما تاکنون: <b>{invite_count}</b> نفر
 
-👇 **از منوی زیر (پایین صفحه) یکی از گزینه‌ها را انتخاب کنید:**"""
-    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
+👇 از منوی زیر یکی از گزینه‌ها را انتخاب کنید:"""
+    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='HTML', reply_markup=get_main_menu())
 
 # ==========================================
-# ⚙️ مدیریت پیام‌های متنی
+# ⚙️ مدیریت منو
 # ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -282,23 +318,42 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if "قیمت ارزها" in text:
-        await context.bot.send_message(chat_id=chat_id, text=generate_fiat_msg(), parse_mode='Markdown')
+        usd = get_nerkh_price_safe(["dollar", "usd"])
+        eur = get_nerkh_price_safe(["euro", "eur"])
+        gbp = get_nerkh_price_safe(["pound", "gbp"])
+        aed = get_nerkh_price_safe(["aed"])
+        try_price = get_nerkh_price_safe(["lira"])
+        cny = get_nerkh_price_safe(["yuan"])
+        cad = get_nerkh_price_safe(["cad"])
+        aud = get_nerkh_price_safe(["aud"])
+        lines = [f"💵 دلار: {usd}", f"💶 یورو: {eur}", f"💷 پوند: {gbp}", f"🇦🇪 درهم: {aed}", 
+                 f"🇹🇷 لیر: {try_price}", f"🇨🇳 یوان: {cny}", f"🇨🇦 دلار کانادا: {cad}", f"🇦🇺 دلار استرالیا: {aud}"]
+        img_bio = generate_infographic("💱 قیمت لحظه‌ای ارزها", lines)
+        await context.bot.send_photo(chat_id=chat_id, photo=img_bio)
     elif "قیمت طلا و سکه" in text:
-        await context.bot.send_message(chat_id=chat_id, text=generate_gold_msg(), parse_mode='Markdown')
+        gold18 = get_nerkh_price_safe(["gold"])
+        coin_emami = get_nerkh_price_safe(["coin"])
+        coin_bahar = get_nerkh_price_safe(["bahar"])
+        coin_nim = get_nerkh_price_safe(["half"])
+        coin_rob = get_nerkh_price_safe(["quarter"])
+        lines = [f"🌕 طلا ۱۸: {gold18}", f"🪙 سکه امامی: {coin_emami}", f"🪙 سکه بهار: {coin_bahar}", f"🪙 نیم: {coin_nim}", f"🪙 ربع: {coin_rob}"]
+        img_bio = generate_infographic("🌕 قیمت طلا و سکه", lines)
+        await context.bot.send_photo(chat_id=chat_id, photo=img_bio)
     elif "قیمت ارز دیجیتال" in text:
-        await context.bot.send_message(chat_id=chat_id, text=generate_crypto_msg(), parse_mode='Markdown')
+        crypto_prices = get_crypto_prices_toman()
+        lines = [f"🪙 {sym}: {prc}" for sym, prc in crypto_prices.items()] if crypto_prices else ["خطا در دریافت"]
+        img_bio = generate_infographic("🪙 قیمت ارز دیجیتال", lines)
+        await context.bot.send_photo(chat_id=chat_id, photo=img_bio)
     elif "ماشین‌حساب طلا" in text:
         await gold_calc_start(update, context)
     elif "دعوت از دوستان" in text:
         try:
             invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
-            
             invite_count = 0
             try:
                 res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
                 invite_count = res.data[0].get('invite_count', 0) if res.data else 0
-            except Exception:
-                pass
+            except Exception: pass
                 
             invite_text = f"""🎁 <b>دعوت از دوستان به دیجی نوسان</b> 🌟
 
@@ -309,7 +364,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 برای دعوت دوستانتان، از دکمه زیر استفاده کنید:"""
             
-            # ✅ متن کامل مارکتینگی و ضد فیشینگ
             share_text = f"""سلام! خواستم این کانال و ربات فوق‌العاده رو بهت معرفی کنم. 🤝
 
 📢 کانال دیجی نوسان:
@@ -328,7 +382,7 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=reply_markup)
         except Exception as e:
-            await context.bot.send_message(chat_id=chat_id, text=f"❌ خطای فنی تلگرام: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ خطای فنی: {e}")
 
 # ==========================================
 # 🧮 ماشین‌حساب طلا
@@ -336,22 +390,16 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-
     gold_price = get_nerkh_price_safe(["gold"])
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"🧮 **ماشین‌حساب طلا**\n\n"
-             f"لطفاً قیمت هر گرم طلای ۱۸ عیار را **به تومان** وارد کنید:\n"
-             f"(راهنما: قیمت لحظه‌ای بازار \u200e`{gold_price}` تومان است)",
-        parse_mode='Markdown'
+        text=f"🧮 <b>ماشین‌حساب طلا</b>\n\nلطفاً قیمت هر گرم طلای ۱۸ عیار را <b>به تومان</b> وارد کنید:\n(راهنما: قیمت لحظه‌ای بازار {gold_price} تومان است)",
+        parse_mode='HTML'
     )
     return PRICE
 
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "استارت" in update.message.text or "منوی اصلی" in update.message.text or "دعوت" in update.message.text:
-        return ConversationHandler.END
     try:
         context.user_data['price'] = float(update.message.text.replace(',', ''))
         await update.message.reply_text("چند گرم طلا می‌خواهید بخرید؟ (مثلاً 5)")
@@ -405,23 +453,23 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_price = base_price + ajrat_amount + profit_amount + tax_amount
         price_per_gram = final_price / weight if weight > 0 else 0
         
-        result_msg = f"""✅ **فاکتور محاسبه طلا**
+        result_msg = f"""✅ <b>فاکتور محاسبه طلا</b>
 
-⚖️ وزن: \u200e`{weight}` گرم
-💰 قیمت پایه هر گرم: \u200e`{price:,.0f}` تومان
-💵 قیمت پایه کل: \u200e`{base_price:,.0f}` تومان
+⚖️ وزن: {weight} گرم
+💰 قیمت پایه هر گرم: {price:,.0f} تومان
+💵 قیمت پایه کل: {base_price:,.0f} تومان
 
-🛠 اجرت ساخت ({ajrat_pct}%): \u200e`{ajrat_amount:,.0f}` تومان
-📈 سود فروشنده ({profit_pct}%): \u200e`{profit_amount:,.0f}` تومان
-🧾 مالیات ({tax_pct}%): \u200e`{tax_amount:,.0f}` تومان
+🛠 اجرت ساخت ({ajrat_pct}%): {ajrat_amount:,.0f} تومان
+📈 سود فروشنده ({profit_pct}%): {profit_amount:,.0f} تومان
+🧾 مالیات ({tax_pct}%): {tax_amount:,.0f} تومان
 
 ➖➖➖➖➖➖➖➖
-💳 **قیمت نهایی: \u200e`{final_price:,.0f}` تومان**
-⚖️ **قیمت نهایی هر گرم: \u200e`{price_per_gram:,.0f}` تومان**
+💳 <b>قیمت نهایی: {final_price:,.0f} تومان</b>
+⚖️ <b>قیمت نهایی هر گرم: {price_per_gram:,.0f} تومان</b>
 
-*💰 دیجی نوسان 👇*
+💰 دیجی نوسان 👇
 @diginavasan"""
-        await update.message.reply_text(result_msg, parse_mode='Markdown', reply_markup=get_main_menu())
+        await update.message.reply_text(result_msg, parse_mode='HTML', reply_markup=get_main_menu())
         return ConversationHandler.END
     except ValueError:
         await update.message.reply_text("لطفاً فقط عدد وارد کنید. درصد مالیات را دوباره بزنید:")
@@ -430,29 +478,6 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("ماشین‌حساب لغو شد.", reply_markup=get_main_menu())
     return ConversationHandler.END
-
-# ==========================================
-# ⚙️ دستور آمار
-# ==========================================
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    
-    try:
-        res = supabase.table('users').select('*').execute()
-        total_users = len(res.data)
-        
-        total_invites = 0
-        for user in res.data:
-            total_invites += user.get('invite_count', 0)
-            
-        stats_msg = f"""📊 **آمار ربات دیجی نوسان**
-
-👥 تعداد کل کاربران: **{total_users}** نفر
-🎁 تعداد کل دعوت‌های موفق: **{total_invites}** نفر"""
-        await update.message.reply_text(stats_msg, parse_mode='Markdown')
-    except Exception as e:
-        await update.message.reply_text(f"خطا در خواندن دیتابیس: {e}")
 
 # ==========================================
 # ⚙️ اجرای ربات
@@ -480,14 +505,14 @@ if __name__ == '__main__':
     
     app.add_handler(gold_conv_handler)
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('stats', admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     
+    # زمان‌بندی: هر ۹۰۰ ثانیه (۱۵ دقیقه) یک عکس اینفوگرافیک ارسال میشه
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. متن دعوت مارکتینگی فعال شد...")
+    print("ربات روشن شد. سیستم ارسال عکس و نفت فعال شد...")
     app.run_polling()

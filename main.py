@@ -82,50 +82,40 @@ def get_nerkh_price_safe(keys_list):
             return f"{price:,.0f}"
     return "0"
 
+# API جدید و پایدار برای کریپتو (CoinPaprika)
 def get_crypto_prices_toman():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        coins = {
+            "BTC": "btc-bitcoin",
+            "ETH": "eth-ethereum",
+            "USDT": "usdt-tether",
+            "BNB": "bnb-binance-coin",
+            "SOL": "sol-solana",
+            "XRP": "xrp-xrp",
+            "DOGE": "doge-dogecoin"
+        }
         
-        # تلاش اول: استفاده از بایننس (بسیار پایدار برای سرورها)
-        url = "https://api.binance.com/api/v3/ticker/price?symbols=[\"BTCUSDT\",\"ETHUSDT\",\"BNBUSDT\",\"SOLUSDT\",\"XRPUSDT\",\"DOGEUSDT\"]"
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            usd_str = get_nerkh_price_safe(["dollar", "usd"])
-            usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
+        usd_str = get_nerkh_price_safe(["dollar", "usd"])
+        usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
+        
+        if usd_float <= 0:
+            return {}
             
-            if usd_float > 0:
-                prices = {}
-                for item in data:
-                    symbol = item['symbol'].replace('USDT', '') # تبدیل BTCUSDT به BTC
-                    usd_val = float(item['price'])
-                    prices[symbol] = f"{int(usd_val * usd_float):,.0f}"
-                prices['USDT'] = f"{int(1 * usd_float):,.0f}" # قیمت تتر برابر با دلار
-                return prices
-
-        # تلاش دوم: استفاده از CoinGecko (اگر بایننس جواب نداد)
-        ids = "bitcoin,ethereum,tether,binancecoin,solana,ripple,dogecoin"
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            usd_str = get_nerkh_price_safe(["dollar", "usd"])
-            usd_float = float(usd_str.replace(',', '')) if usd_str != "0" else 0
-            
-            if usd_float > 0:
-                prices = {}
-                for coin_id, coin_name in [("bitcoin", "BTC"), ("ethereum", "ETH"), ("tether", "USDT"), 
-                                           ("binancecoin", "BNB"), ("solana", "SOL"), ("ripple", "XRP"), ("dogecoin", "DOGE")]:
-                    if coin_id in data:
-                        usd_val = data[coin_id]['usd']
-                        prices[coin_name] = f"{int(usd_val * usd_float):,.0f}"
-                return prices
+        prices = {}
+        for symbol, coin_id in coins.items():
+            url = f"https://api.coinpaprika.com/v1/tickers/{coin_id}"
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                usd_val = float(res.json()['quotes']['USD']['price'])
+                prices[symbol] = f"{int(usd_val * usd_float):,.0f}"
+        return prices
     except Exception as e:
         print(f"Crypto error: {e}")
-    return {}
+        return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس با قالب جدید
+# 🎨 تابع ساخت عکس با قالب جدید و متن راست‌چین
 # ==========================================
 def generate_infographic():
     try:
@@ -145,9 +135,14 @@ def generate_infographic():
         font_text = ImageFont.load_default()
         font_small = ImageFont.load_default()
 
+    # تابع اصلاح متن فارسی
     def fa(text):
-        reshaped_text = arabic_reshaper.reshape(text)
-        return get_display(reshaped_text)
+        try:
+            reshaped_text = arabic_reshaper.reshape(text)
+            bidi_text = get_display(reshaped_text)
+            return bidi_text
+        except:
+            return text
 
     day, shamsi, _, _, t, _ = get_dates_info()
     
@@ -190,7 +185,7 @@ def generate_infographic():
                 draw.text((x_right, y3), fa(f"🔸 {symbol}: {crypto[symbol]} تومان"), font=font_text, fill=(255, 255, 255), anchor="ra")
                 y3 += 50
     else:
-        draw.text((x_right, y3), fa("خطا در دریافت اطلاعات"), font=font_text, fill=(255, 100, 100), anchor="ra")
+        draw.text((x_right, y3), fa("دریافت اطلاعات با خطا مواجه شد"), font=font_text, fill=(255, 100, 100), anchor="ra")
 
     bio = BytesIO()
     bio.name = 'summary.jpeg'
@@ -305,14 +300,14 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await current_job(context)
 
 # ==========================================
-# ⚙️ منوی اصلی (با دکمه تست عکس)
+# ⚙️ منوی اصلی
 # ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
         [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🖼️ تست عکس (TEMP)")], # دکمه تست
+        [KeyboardButton("🖼️ تست عکس (TEMP)")],
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -358,7 +353,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "قیمت ارز دیجیتال" in text:
         await send_crypto_to_channel(context)
     elif "تست عکس" in text:
-        # ارسال عکس به چت خود کاربر (برای تست)
         await send_image_summary_to_channel(context, chat_id=chat_id)
     elif "ماشین‌حساب طلا" in text:
         await gold_calc_start(update, context)
@@ -529,5 +523,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم تست عکس و بایننس فعال شد...")
+    print("ربات روشن شد. تصحیح متن فارسی و کریپتو...")
     app.run_polling()

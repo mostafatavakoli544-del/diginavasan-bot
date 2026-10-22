@@ -7,12 +7,10 @@ import socketserver
 import pytz
 import jdatetime
 import urllib.parse
-import arabic_reshaper
-from bidi.algorithm import get_display
 from io import BytesIO
 from hijri_converter import convert
 from datetime import datetime, time
-from PIL import Image, ImageDraw, ImageFont, features
+from pictex import Canvas, Column, Row, Text, Image as PicImage
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
@@ -38,10 +36,8 @@ TEMPLATES = {
     "footer": "\n*💰 قیمت لحظه‌ای دیجی نوسان 👇*\n@diginavasan"
 }
 
-HAS_RAQM = features.check("raqm")
-
 # ==========================================
-# ⚙️ توابع پایه (دقیقا مثل نسخه قبلی)
+# ⚙️ توابع پایه (دریافت قیمت‌ها)
 # ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
@@ -96,67 +92,12 @@ def get_crypto_prices_toman():
     except Exception:
         return {}
 
-def download_image(url, size=(60, 60)):
-    try:
-        response = requests.get(url, timeout=5)
-        img = Image.open(BytesIO(response.content)).convert("RGBA")
-        img = img.resize(size, Image.Resampling.LANCZOS)
-        return img
-    except Exception as e:
-        print(f"Failed to load icon: {e}")
-        return None
-
 # ==========================================
-# 🎨 تابع ساخت عکس (نسخه هوشمند v2)
+# 🎨 تابع ساخت عکس با PicTex (هوشمند)
 # ==========================================
-def generate_infographic():
-    font_path = "vazir.ttf"
-    if not os.path.exists(font_path):
-        try:
-            font_url = "https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/ttf/Vazirmatn-Bold.ttf"
-            r = requests.get(font_url, timeout=20)
-            with open(font_path, 'wb') as f:
-                f.write(r.content)
-        except Exception as e:
-            print(f"Font download failed: {e}")
-
-    try:
-        img = Image.open("template.jpg").convert("RGBA")
-    except Exception:
-        img = Image.new('RGB', (1080, 1920), color=(15, 25, 45))
-    
-    draw = ImageDraw.Draw(img)
-    w, h = img.size
-    scale = w / 1080.0
-    
-    try:
-        font_title = ImageFont.truetype(font_path, int(45 * scale))
-        font_text_left = ImageFont.truetype(font_path, int(32 * scale)) 
-        font_text_right = ImageFont.truetype(font_path, int(30 * scale))
-    except Exception:
-        font_title = ImageFont.load_default()
-        font_text_left = ImageFont.load_default()
-        font_text_right = ImageFont.load_default()
-
-    def fa(text):
-        if HAS_RAQM: return text
-        return get_display(arabic_reshaper.reshape(text))
-
-    # استروک مشکی برای خوانایی
-    def draw_text(text, x, y, font, color, anchor, stroke=True):
-        sw = 1 if stroke else 0
-        if HAS_RAQM:
-            draw.text((x, y), text, font=font, fill=color, anchor=anchor, direction="rtl", stroke_width=sw, stroke_fill=(0,0,0))
-        else:
-            draw.text((x, y), text, font=font, fill=color, anchor=anchor, stroke_width=sw, stroke_fill=(0,0,0))
-
+def generate_infographic_pictex():
+    # ۱. دریافت داده‌ها
     time_str, _ = get_dates_info()
-    
-    # هدر
-    draw_text("دیجی نوسان", w * 0.35, h * 0.065, font_title, (20, 30, 50), "mm", stroke=False)
-    draw_text(time_str, w * 0.82, h * 0.065, font_text_right, (20, 30, 50), "mm", stroke=False)
-
-    # داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
     eur = get_nerkh_price_safe(["euro"])
     gbp = get_nerkh_price_safe(["pound"])
@@ -174,28 +115,47 @@ def generate_infographic():
     coin_rob = get_nerkh_price_safe(["quarter"])
     
     crypto = get_crypto_prices_toman()
-    icon_size = int(32 * scale)
 
-    # ۳. ستون چپ (ارزها)
-    y_start_left = h * 0.235
-    y_step_left = (h * 0.68) / 8
+    # ۲. دانلود فونت در صورت نیاز
+    font_path = "vazir.ttf"
+    if not os.path.exists(font_path):
+        r = requests.get("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/ttf/Vazirmatn-Bold.ttf")
+        with open(font_path, 'wb') as f:
+            f.write(r.content)
     
+    # ۳. ساخت کانواس با پس‌زمینه
+    canvas = Canvas(width=1080, height=1920)
+    if os.path.exists("template.jpg"):
+        canvas.add(PicImage("template.jpg").set_position(0, 0))
+
+    # ۴. هدر (بالای صفحه)
+    header = Row(width="100%", height=150, align_items="center", justify_content="space-between", padding=(30, 0))
+    header.add(Text("دیجی نوسان", font_path=font_path, font_size=45, color="#142132"))
+    header.add(Text(time_str, font_path=font_path, font_size=35, color="#142132"))
+    canvas.add(header)
+
+    # ۵. بخش اصلی (دو ستون)
+    main_row = Row(width="100%", height=1550, padding=(40, 0))
+
+    # ---------- ستون چپ: ارزها ----------
+    left_column = Column(width="45%", height="100%", justify_content="space-around")
     currencies = [
         ("us", f"دلار: {usd}"), ("eu", f"یورو: {eur}"), ("gb", f"پوند: {gbp}"), ("ae", f"درهم: {aed}"),
         ("tr", f"لیر: {lira}"), ("cn", f"یوان: {cny}"), ("ca", f"دلار کانادا: {cad}"), ("au", f"دلار استرالیا: {aud}")
     ]
+    for country_code, text in currencies:
+        row = Row(width="100%", align_items="center", gap=15)
+        flag_img = PicImage(f"https://flagcdn.com/w80/{country_code}.png", width=40, height=40)
+        row.add(flag_img)
+        row.add(Text(text, font_path=font_path, font_size=30, color="white", direction="rtl"))
+        left_column.add(row)
     
-    for i, (country_code, text) in enumerate(currencies):
-        y_pos = y_start_left + (i * y_step_left) + (y_step_left / 2)
-        icon = download_image(f"https://flagcdn.com/w80/{country_code}.png", size=(icon_size, icon_size))
-        if icon:
-            img.paste(icon, (int(w * 0.08) - icon_size//2, int(y_pos) - icon_size//2), icon)
-        draw_text(fa(text), w * 0.43, y_pos, font_text_left, (255, 255, 255), "rm")
+    main_row.add(left_column)
 
-    # ۴. کادر بالا سمت راست (طلا و سکه)
-    y_start_top = h * 0.235
-    y_step_top = (h * 0.31) / 6
-    
+    # ---------- ستون راست: طلا و کریپتو ----------
+    right_column = Column(width="55%", height="100%", justify_content="space-between")
+
+    # کادر بالایی: طلا و سکه
     gold_items = [
         (f"طلا ۱۸: {gold18}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
         (f"طلا ۲۴: {gold24}", "https://cdn-icons-png.flaticon.com/512/2845/2845687.png"),
@@ -204,47 +164,46 @@ def generate_infographic():
         (f"نیم سکه: {coin_nim}", "https://cdn-icons-png.flaticon.com/512/217/217488.png"),
         (f"ربع سکه: {coin_rob}", "https://cdn-icons-png.flaticon.com/512/217/217488.png")
     ]
+    gold_box = Column(width="100%", height="55%", justify_content="space-around")
+    for text, icon_url in gold_items:
+        row = Row(width="100%", align_items="center", justify_content="flex-end", gap=15)
+        row.add(Text(text, font_path=font_path, font_size=28, color="white", direction="rtl"))
+        row.add(PicImage(icon_url, width=35, height=35))
+        gold_box.add(row)
+    right_column.add(gold_box)
 
-    for i, (text, icon_url) in enumerate(gold_items):
-        y_pos = y_start_top + (i * y_step_top) + (y_step_top / 2)
-        icon = download_image(icon_url, size=(icon_size, icon_size))
-        if icon:
-            img.paste(icon, (int(w * 0.91) - icon_size//2, int(y_pos) - icon_size//2), icon)
-        # متن ها دقیقا از لبه کادر تا لوگو فاصله گرفتن
-        draw_text(fa(text), w * 0.86, y_pos, font_text_right, (255, 255, 255), "rm")
-
-    # ۵. کادر پایین سمت راست (کریپتو)
-    y_start_bot = h * 0.615
-    y_step_bot = (h * 0.245) / 4
-    
+    # کادر پایینی: کریپتو
     crypto_icons = {
         "BTC": "https://cryptologos.cc/logos/bitcoin-btc-logo.png",
         "ETH": "https://cryptologos.cc/logos/ethereum-eth-logo.png",
         "USDT": "https://cryptologos.cc/logos/tether-usdt-logo.png",
         "BNB": "https://cryptologos.cc/logos/bnb-bnb-logo.png"
     }
-
     if crypto:
         crypto_items = [(f"{sym}: {prc}", crypto_icons.get(sym, crypto_icons["BTC"])) for sym, prc in crypto.items()]
     else:
         crypto_items = [("خطا در دریافت", crypto_icons["BTC"])]
 
-    for i, (text, icon_url) in enumerate(crypto_items):
-        y_pos = y_start_bot + (i * y_step_bot) + (y_step_bot / 2)
-        icon = download_image(icon_url, size=(icon_size, icon_size))
-        if icon:
-            img.paste(icon, (int(w * 0.91) - icon_size//2, int(y_pos) - icon_size//2), icon)
-        draw_text(fa(text), w * 0.86, y_pos, font_text_right, (255, 255, 255), "rm")
+    crypto_box = Column(width="100%", height="40%", justify_content="space-around")
+    for text, icon_url in crypto_items:
+        row = Row(width="100%", align_items="center", justify_content="flex-end", gap=15)
+        row.add(Text(text, font_path=font_path, font_size=28, color="white", direction="rtl"))
+        row.add(PicImage(icon_url, width=35, height=35))
+        crypto_box.add(row)
+    right_column.add(crypto_box)
 
+    main_row.add(right_column)
+    canvas.add(main_row)
+
+    # ۶. خروجی گرفتن
     bio = BytesIO()
+    canvas.save(bio, format="JPEG", quality=95)
     bio.name = 'summary.jpeg'
-    img = img.convert("RGB")
-    img.save(bio, 'JPEG', quality=95)
     bio.seek(0)
     return bio
 
 # ==========================================
-# ⚙️ بقیه کدها دقیقا کپی میشن...
+# ⚙️ ارسال به کانال
 # ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     time_str, _ = get_dates_info()
@@ -304,7 +263,7 @@ async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
-    img_bio = generate_infographic()
+    img_bio = generate_infographic_pictex()
     await context.bot.send_photo(
         chat_id=chat_id, 
         photo=img_bio, 
@@ -525,7 +484,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ==========================================
-# ⚙️ اجرای ربات (تغییر یافته برای main_v2)
+# ⚙️ اجرای ربات
 # ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
@@ -558,5 +517,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("نسخه ۲ ربات روشن شد. لایه‌بندی هوشمند فعال است...")
+    print("نسخه ۲ ربات روشن شد. موتور PicTex فعال است...")
     app.run_polling()

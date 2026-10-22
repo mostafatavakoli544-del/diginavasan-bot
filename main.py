@@ -50,10 +50,10 @@ def get_dates_info():
     tehran_tz = pytz.timezone('Asia/Tehran')
     now = datetime.now(tehran_tz)
     time_str = now.strftime('%H:%M')
-    return "", "", "", "", time_str, now.hour
+    return time_str, now.hour
 
 def is_working_hours():
-    _, _, _, _, _, hour = get_dates_info()
+    _, hour = get_dates_info()
     return 8 <= hour < 20
 
 def get_nerkh_price(key):
@@ -95,15 +95,15 @@ def get_crypto_prices_toman():
         return {}
 
 # ==========================================
-# 🎨 تابع ساخت عکس با فونت اصلاح شده
+# 🎨 تابع ساخت عکس با دانلود خودکار فونت
 # ==========================================
 def generate_infographic():
-    # دانلود فونت از یک لینک بسیار پایدار
+    # دانلود خودکار فونت از یک لینک بسیار پایدار
     font_path = "vazir.ttf"
     if not os.path.exists(font_path):
         try:
             font_url = "https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/ttf/Vazirmatn-Bold.ttf"
-            r = requests.get(font_url, timeout=15)
+            r = requests.get(font_url, timeout=20)
             with open(font_path, 'wb') as f:
                 f.write(r.content)
         except Exception as e:
@@ -118,7 +118,6 @@ def generate_infographic():
     w, h = img.size
     scale = w / 1080.0
     
-    # لود فونت با سایزهای متناسب
     try:
         font_title = ImageFont.truetype(font_path, int(35 * scale))
         font_text = ImageFont.truetype(font_path, int(30 * scale))
@@ -132,7 +131,7 @@ def generate_infographic():
         bidi_text = get_display(reshaped_text)
         return bidi_text
 
-    _, _, _, _, t, _ = get_dates_info()
+    time_str, _ = get_dates_info()
     
     # داده‌ها
     usd = get_nerkh_price_safe(["dollar"])
@@ -158,7 +157,7 @@ def generate_infographic():
     draw.text((w * 0.28, h * 0.06), fa("قیمت لحظه‌ای بازار"), font=font_title, fill=(20, 30, 50), anchor="mm")
 
     # ۲. کادر بالا سمت راست (ساعت)
-    draw.text((w * 0.83, h * 0.065), fa(t), font=font_text, fill=(20, 30, 50), anchor="mm")
+    draw.text((w * 0.83, h * 0.065), fa(time_str), font=font_text, fill=(20, 30, 50), anchor="mm")
 
     # ۳. ستون بلند سمت چپ (ارزها)
     currencies = [
@@ -182,7 +181,7 @@ def generate_infographic():
 
     # ۵. کادر وسط سمت راست (سکه‌ها)
     coins_list = [f"امامی: {coin_emami}", f"بهار: {coin_bahar}", f"نیم: {coin_nim}", f"ربع: {coin_rob}"]
-    y_coin_start = h * 0.51
+    y_coin_start = h * 0.50
     for i, coin in enumerate(coins_list):
         draw.text((w * 0.91, y_coin_start + (i * (h * 0.035))), fa(coin), font=font_text, fill=(255, 255, 255), anchor="ra")
 
@@ -204,7 +203,7 @@ def generate_infographic():
 # ⚙️ ارسال به کانال
 # ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, t, _ = get_dates_info()
+    time_str, _ = get_dates_info()
     usd = get_nerkh_price_safe(["dollar", "usd"])
     eur = get_nerkh_price_safe(["euro", "eur"])
     gbp = get_nerkh_price_safe(["pound", "gbp"])
@@ -213,7 +212,7 @@ async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     cny = get_nerkh_price_safe(["yuan"])
     
     msg = f"""{TEMPLATES['fiat_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
+⏰ ساعت آپدیت: \u200e`{time_str}`
 
 💵 دلار = \u200e`{usd}` تومان
 💶 یورو = \u200e`{eur}` تومان
@@ -225,7 +224,7 @@ async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, t, _ = get_dates_info()
+    time_str, _ = get_dates_info()
     gold18 = get_nerkh_price_safe(["gold"])
     coin_emami = get_nerkh_price_safe(["coin"])
     coin_bahar = get_nerkh_price_safe(["bahar"])
@@ -233,7 +232,7 @@ async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
     coin_rob = get_nerkh_price_safe(["quarter"])
     
     msg = f"""{TEMPLATES['gold_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
+⏰ ساعت آپدیت: \u200e`{time_str}`
 
 🌕 طلا ۱۸ عیار = \u200e`{gold18}` تومان
 🪙 سکه امامی = \u200e`{coin_emami}` تومان
@@ -244,11 +243,11 @@ async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode='Markdown')
 
 async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE):
-    _, _, _, _, t, _ = get_dates_info()
+    time_str, _ = get_dates_info()
     crypto = get_crypto_prices_toman()
     
     msg = f"""{TEMPLATES['crypto_title']}
-⏰ ساعت آپدیت: \u200e`{t}`
+⏰ ساعت آپدیت: \u200e`{time_str}`
 
 """
     if crypto:
@@ -518,5 +517,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم فونت و قالب جدید اعمال شد...")
+    print("ربات روشن شد. سیستم دانلود خودکار فونت و قالب جدید فعال شد...")
     app.run_polling()

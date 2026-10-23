@@ -8,6 +8,7 @@ import pytz
 import jdatetime
 import urllib.parse
 import arabic_reshaper
+import re
 from bidi.algorithm import get_display
 from io import BytesIO
 from hijri_converter import convert
@@ -39,13 +40,8 @@ TEMPLATES = {
 }
 
 HAS_RAQM = features.check("raqm")
-
-# دیکشنری برای نگهداری آلارم‌ها در حافظه
 user_alerts = {}
 
-# ==========================================
-# 📊 تابع ثبت رفتار کاربر در دیتابیس (اصلاح نهایی)
-# ==========================================
 def log_event(user_id, event_name):
     try:
         url = f"{SUPABASE_URL}/rest/v1/user_events"
@@ -58,11 +54,8 @@ def log_event(user_id, event_name):
         data = {"user_id": user_id, "event_name": event_name}
         requests.post(url, json=data, headers=headers, timeout=5)
     except Exception:
-        pass # اگر دیتابیس خطا داد، ربات کرش نکنه
+        pass
 
-# ==========================================
-# ⚙️ توابع پایه و API
-# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
@@ -118,9 +111,6 @@ def download_image(url, size=(60, 60)):
     except Exception:
         return None
 
-# ==========================================
-# 🚨 تابع بررسی آلارم‌ها (هر 5 دقیقه اجرا میشه)
-# ==========================================
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
     global user_alerts
     for user_id in list(user_alerts.keys()):
@@ -138,7 +128,6 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
                 if 'BTC' in crypto:
                     current_price = int(crypto['BTC'].replace(',', ''))
             
-            # اگر قیمت به هدف رسید یا ازش رد شد
             if current_price > 0 and current_price >= target:
                 try:
                     await context.bot.send_message(
@@ -146,16 +135,13 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
                         text=f"🚨 <b>آلارم قیمتی شما فعال شد!</b>\n\nقیمت <b>{asset}</b> به {current_price:,.0f} تومان رسیده است (هدف شما: {target:,.0f} تومان).",
                         parse_mode='HTML'
                     )
-                    user_alerts[user_id].remove(alert) # حذف بعد از ارسال (یک بار مصرف)
+                    user_alerts[user_id].remove(alert)
                 except Exception:
                     pass
         
         if not user_alerts[user_id]:
             del user_alerts[user_id]
 
-# ==========================================
-# 🎨 توابع ساخت عکس (بدون تغییر)
-# ==========================================
 def create_gradient_bg(w, h):
     base = Image.new('RGB', (w, h), (15, 25, 45))
     top, bottom = (15, 25, 45), (5, 10, 20)
@@ -197,7 +183,6 @@ def generate_infographic():
 
     time_str, _ = get_dates_info()
     
-    # هدر
     header_bg = create_gold_gradient(w-80, 120)
     mask = Image.new('L', (w-80, 120), 0)
     ImageDraw.Draw(mask).rounded_rectangle([(0, 0), (w-80, 120)], radius=20, fill=255)
@@ -206,12 +191,10 @@ def generate_infographic():
     draw_text("دیجی نوسان", w * 0.35, h * 0.05, font_title, (20, 30, 50), "mm", False)
     draw_text(time_str, w * 0.82, h * 0.05, font_text, (20, 30, 50), "mm", False)
 
-    # کادرها
     draw.rounded_rectangle([(40, 220), (480, 1850)], radius=30, fill=(255, 255, 255, 15), outline=(200, 160, 70, 200), width=2)
     draw.rounded_rectangle([(520, 220), (1040, 900)], radius=30, fill=(255, 255, 255, 15), outline=(200, 160, 70, 200), width=2)
     draw.rounded_rectangle([(520, 940), (1040, 1850)], radius=30, fill=(255, 255, 255, 15), outline=(200, 160, 70, 200), width=2)
 
-    # محتوا (خلاصه شده برای خوانایی)
     currencies = [("us", "دلار", get_nerkh_price_safe(["dollar"])), ("eu", "یورو", get_nerkh_price_safe(["euro"])), ("gb", "پوند", get_nerkh_price_safe(["pound"])), ("ae", "درهم", get_nerkh_price_safe(["aed"])), ("tr", "لیر", get_nerkh_price_safe(["lira"])), ("cn", "یوان", get_nerkh_price_safe(["yuan"])), ("ca", "کانادا", get_nerkh_price_safe(["cad"])), ("au", "استرالیا", get_nerkh_price_safe(["aud"]))]
     for i, (code, name, price) in enumerate(currencies):
         y = 280 + (i * (1850-280)/8) + ((1850-280)/16)
@@ -239,9 +222,6 @@ def generate_infographic():
     bio.seek(0)
     return bio
 
-# ==========================================
-# ⚙️ ارسال به کانال
-# ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     msg = f"{TEMPLATES['fiat_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n💵 دلار = \u200e`{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n💶 یورو = \u200e`{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n💷 پوند = \u200e`{get_nerkh_price_safe(['pound', 'gbp'])}` تومان\n🇦🇪 درهم = \u200e`{get_nerkh_price_safe(['aed'])}` تومان\n🇹🇷 لیر = \u200e`{get_nerkh_price_safe(['lira'])}` تومان\n🇨🇳 یوان = \u200e`{get_nerkh_price_safe(['yuan'])}` تومان\n{TEMPLATES['footer']}"
@@ -279,9 +259,6 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await jobs[_rotation_index % len(jobs)](context)
     _rotation_index += 1
 
-# ==========================================
-# 🧠 منو و کیبورد
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
@@ -355,9 +332,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
         except: pass
 
-# ==========================================
-# 🧮 ماشین‌حساب طلا (بخش قبلی)
-# ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🧮 <b>ماشین‌حساب طلا</b>\n\nلطفاً قیمت هر گرم طلای ۱۸ عیار را <b>به تومان</b> وارد کنید:\n(راهنما: قیمت لحظه‌ای بازار {get_nerkh_price_safe(['gold'])} تومان است)", parse_mode='HTML')
@@ -402,9 +376,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 💸 ماشین‌حساب اقساط (جدید)
-# ==========================================
 LOAN_AMT, LOAN_INT, LOAN_MONTHS = range(10, 13)
 async def loan_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💸 <b>ماشین‌حساب اقساط وام</b>\n\nلطفاً مبلغ کل وام را <b>به تومان</b> وارد کنید (مثلاً 100000000):", parse_mode='HTML')
@@ -434,9 +405,6 @@ async def loan_get_months(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:"); return LOAN_MONTHS
 
-# ==========================================
-# 💱 مبدل هوشمند ارز (جدید)
-# ==========================================
 CURRENCY_AMT, CURRENCY_TYPE = range(20, 22)
 async def currency_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💱 <b>مبدل هوشمند ارز</b>\n\nلطفاً مبلغ را به <b>تومان</b> وارد کنید (مثلاً 5000000):", parse_mode='HTML')
@@ -463,25 +431,28 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"💱 {amt:,.0f} تومان معادل <b>{result:,.4f} {choice}</b> است.\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 📅 تبدیل تاریخ (جدید)
-# ==========================================
 DATE_INPUT = 30
 async def date_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📅 <b>تبدیل تاریخ</b>\n\nلطفاً یک تاریخ را با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01 یا 2024/07/22):\n\n<i>ربات به صورت هوشمند تشخیص می‌دهد شمسی است یا میلادی.</i>", parse_mode='HTML')
     return DATE_INPUT
 async def date_get_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw_text = update.message.text.strip()
     try:
-        parts = update.message.text.split('/')
+        parts = re.split(r'[\/\-\s]+', raw_text)
         if len(parts) != 3: raise ValueError
-        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        nums = [int(p) for p in parts]
+        a, b, c = nums[0], nums[1], nums[2]
         
-        if y > 1500: # میلادی
+        if a > 1500: y, m, d = a, b, c
+        elif c > 1500: y, m, d = c, b, a
+        else: y, m, d = a, b, c
+
+        if y > 1500: 
             miladi = datetime(y, m, d)
             shamsi = jdatetime.date.fromgregorian(date=miladi)
             ghamari = convert.Gregorian(y, m, d).to_hijri()
             msg = f"📅 <b>نتیجه تبدیل تاریخ</b>\n\n📆 میلادی: {y}/{m}/{d}\n☀️ شمسی: {shamsi.year}/{shamsi.month}/{shamsi.day}\n🌙 قمری: {ghamari.year}/{ghamari.month}/{ghamari.day}"
-        else: # شمسی
+        else: 
             shamsi = jdatetime.date(y, m, d)
             miladi = shamsi.togregorian()
             ghamari = convert.Jalali(y, m, d).to_hijri()
@@ -489,13 +460,10 @@ async def date_get_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(f"{msg}\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
         return ConversationHandler.END
-    except:
-        await update.message.reply_text("فرمت وارد شده صحیح نیست. لطفاً دقیقاً مثل 1403/05/01 وارد کنید:", reply_markup=get_main_menu())
+    except Exception:
+        await update.message.reply_text("فرمت وارد شده صحیح نیست. لطفاً دقیقاً مثل 1403/05/01 وارد کنید:\n(برای بازگشت به منو روی دکمه زیر بزنید)", reply_markup=get_main_menu())
         return ConversationHandler.END
 
-# ==========================================
-# 🌤 وضعیت آب‌وهوا (جدید)
-# ==========================================
 WEATHER_CITY = 40
 async def weather_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🌤 <b>وضعیت آب‌وهوا</b>\n\nلطفاً نام شهر خود را وارد کنید (مثلاً تهران یا Mashhad):", parse_mode='HTML')
@@ -515,9 +483,6 @@ async def weather_get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("خطا در دریافت اطلاعات آب‌وهوا.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🚨 آلارم قیمتی (جدید)
-# ==========================================
 ALERT_ASSET, ALERT_PRICE = range(50, 52)
 async def alert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["دلار", "طلا", "بیت‌کوین"], ["لغو"]]
@@ -540,14 +505,10 @@ async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("لطفاً فقط عدد وارد کنید:")
         return ALERT_PRICE
 
-# ==========================================
-# ⚙️ اجرای ربات
-# ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # هندلرهای مکالمه
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب طلا"), gold_calc_start)], states={PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)], WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)], AJRAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ajrat)], PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_profit)], TAX: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tax)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)], allow_reentry=True))
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب اقساط"), loan_calc_start)], states={LOAN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_amt)], LOAN_INT: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_int)], LOAN_MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_months)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)], allow_reentry=True))
@@ -560,18 +521,14 @@ if __name__ == '__main__':
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("آلارم قیمتی"), alert_start)], states={ALERT_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_asset)], ALERT_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_price)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
 
-    # هندلرهای عمومی
     app.add_handler(CommandHandler('start', start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
     
-    # زمان‌بندی‌ها
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
-    
-    # زمان‌بندی چک کردن آلارم‌ها (هر 5 دقیقه)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    print("ربات روشن شد. ابزارهای جدید فعال شدند...")
+    print("ربات روشن شد. ابزارهای جدید و تبدیل تاریخ اصلاح‌شده فعال شدند...")
     app.run_polling()

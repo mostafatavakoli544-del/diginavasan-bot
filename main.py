@@ -5,14 +5,11 @@ import threading
 import http.server
 import socketserver
 import pytz
-import jdatetime
 import urllib.parse
 import arabic_reshaper
-import re
 import asyncio
 from bidi.algorithm import get_display
 from io import BytesIO
-from hijri_converter import convert
 from datetime import datetime, time
 from PIL import Image, ImageDraw, ImageFont, features
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
@@ -294,8 +291,7 @@ def get_main_menu():
         [KeyboardButton("🚀 استارت / منوی اصلی")],
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه"), KeyboardButton("🪙 قیمت ارز دیجیتال")],
         [KeyboardButton("🧮 ماشین‌حساب طلا"), KeyboardButton("💸 ماشین‌حساب اقساط"), KeyboardButton("💱 مبدل هوشمند ارز")],
-        [KeyboardButton("📅 تبدیل تاریخ"), KeyboardButton("🌤 وضعیت آب‌وهوا"), KeyboardButton("🚨 آلارم قیمتی")],
-        [KeyboardButton("🤖 چت با هوش مصنوعی")],
+        [KeyboardButton("🌤 وضعیت آب‌وهوا"), KeyboardButton("🚨 آلارم قیمتی"), KeyboardButton("🤖 چت با هوش مصنوعی")],
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -340,8 +336,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loan_calc_start(update, context)
     elif "مبدل هوشمند ارز" in text:
         await currency_conv_start(update, context)
-    elif "تبدیل تاریخ" in text:
-        await date_conv_start(update, context)
     elif "وضعیت آب‌وهوا" in text:
         await weather_start(update, context)
     elif "آلارم قیمتی" in text:
@@ -497,83 +491,6 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ==========================================
-# 📅 تبدیل تاریخ (نسخه ضدضربه و فوق هوشمند)
-# ==========================================
-DATE_INPUT = 30
-async def date_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📅 <b>تبدیل تاریخ</b>\n\nلطفاً یک تاریخ را با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01 یا 2024/07/22):\n\n<i>اعداد فارسی و انگلیسی هر دو قبول است. (برای انصراف روی «لغو» بزنید)</i>", 
-        parse_mode='HTML',
-        reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True)
-    )
-    return DATE_INPUT
-
-async def date_get_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    raw_text = update.message.text.strip()
-    
-    # ۱. بررسی دکمه لغو و منو (برای اینکه کاربر گیر نکنه)
-    if raw_text == "لغو":
-        return await cancel(update, context)
-        
-    menu_keywords = ["استارت", "منوی اصلی", "قیمت ارزها", "قیمت طلا", "قیمت ارز دیجیتال", "ماشین‌حساب طلا", "ماشین‌حساب اقساط", "مبدل هوشمند ارز", "وضعیت آب‌وهوا", "آلارم قیمتی", "چت با هوش مصنوعی", "دعوت از دوستان"]
-    if any(kw in raw_text for kw in menu_keywords):
-        await handle_menu_text(update, context)
-        return ConversationHandler.END
-        
-    try:
-        # ۲. تبدیل اعداد فارسی و عربی به انگلیسی
-        persian_digits = "۰۱۲۳۴۵۶۷۸۹"
-        arabic_digits = "٠١٢٣٤٥٦٧٨٩"
-        english_digits = "0123456789"
-        translation_table = str.maketrans(persian_digits + arabic_digits, english_digits + english_digits)
-        clean_text = raw_text.translate(translation_table)
-        
-        # ۳. استخراج اعداد با Regex (دور زدن اسلش، خط تیره، نقطه و فاصله)
-        nums = [int(s) for s in re.findall(r'\d+', clean_text)]
-        
-        if len(nums) != 3:
-            raise ValueError("تعداد اعداد وارد شده باید دقیقاً ۳ عدد باشد (سال، ماه، روز).")
-        
-        a, b, c = nums[0], nums[1], nums[2]
-        
-        # ۴. تشخیص هوشمند سال
-        if a > 1500: y, m, d = a, b, c
-        elif c > 1500: y, m, d = c, b, a
-        else: y, m, d = a, b, c
-
-        # ۵. تبدیل
-        if y > 1500: # میلادی
-            miladi = datetime(y, m, d)
-            shamsi = jdatetime.date.fromgregorian(date=miladi)
-            ghamari = convert.Gregorian(y, m, d).to_hijri()
-            msg = f"📅 <b>نتیجه تبدیل تاریخ</b>\n\n📆 میلادی: {y}/{m}/{d}\n☀️ شمسی: {shamsi.year}/{shamsi.month}/{shamsi.day}\n🌙 قمری: {ghamari.year}/{ghamari.month}/{ghamari.day}"
-        else: # شمسی
-            shamsi = jdatetime.date(y, m, d)
-            miladi = shamsi.togregorian()
-            ghamari = convert.Jalali(y, m, d).to_hijri()
-            msg = f"📅 <b>نتیجه تبدیل تاریخ</b>\n\n☀️ شمسی: {y}/{m}/{d}\n📆 میلادی: {miladi.year}/{miladi.month}/{miladi.day}\n🌙 قمری: {ghamari.year}/{ghamari.month}/{ghamari.day}"
-        
-        await update.message.reply_text(f"{msg}\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
-        return ConversationHandler.END
-        
-    except ValueError as ve:
-        # خطای مربوط به تاریخ نامعتبر (مثلاً ماه ۱۳)
-        await update.message.reply_text(
-            f"❌ خطا: {str(ve)}\nلطفاً یک تاریخ معتبر با فرمت سال/ماه/روز وارد کنید (مثلاً 1403/05/01).", 
-            parse_mode='HTML',
-            reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True)
-        )
-        return DATE_INPUT
-    except Exception as e:
-        # خطای عمومی (مثلاً مشکل در تبدیل)
-        await update.message.reply_text(
-            "❌ تاریخ وارد شده معتبر نیست یا خارج از محدوده مجاز است.\nلطفاً دقیقاً با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01).", 
-            parse_mode='HTML',
-            reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True)
-        )
-        return DATE_INPUT
-
-# ==========================================
 # 🌤 وضعیت آب‌وهوا
 # ==========================================
 WEATHER_CITY = 40
@@ -630,18 +547,6 @@ if __name__ == '__main__':
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("مبدل هوشمند ارز"), currency_conv_start)], states={CURRENCY_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, conv_get_amt)], CURRENCY_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, conv_get_type)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
     
-    # هندلر تاریخ با Fallbackهای کامل
-    app.add_handler(ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("تبدیل تاریخ"), date_conv_start)], 
-        states={DATE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, date_get_input)]}, 
-        fallbacks=[
-            CommandHandler('cancel', cancel), 
-            MessageHandler(filters.Regex("^لغو$"), cancel),
-            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🧮 ماشین‌حساب طلا|💸 ماشین‌حساب اقساط|💱 مبدل هوشمند ارز|📅 تبدیل تاریخ|🌤 وضعیت آب‌وهوا|🚨 آلارم قیمتی|🤖 چت با هوش مصنوعی)$"), handle_menu_text)
-        ], 
-        allow_reentry=True
-    ))
-    
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("وضعیت آب‌وهوا"), weather_start)], states={WEATHER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, weather_get_city)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("آلارم قیمتی"), alert_start)], states={ALERT_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_asset)], ALERT_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_price)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
@@ -657,5 +562,5 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    print("ربات روشن شد. هوش مصنوعی و تبدیل تاریخ اصلاح شدند...")
+    print("ربات روشن شد. تبدیل تاریخ حذف شد. سایر ابزارها فعال هستند...")
     app.run_polling()

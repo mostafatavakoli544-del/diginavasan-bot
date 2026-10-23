@@ -41,27 +41,43 @@ TEMPLATES = {
 HAS_RAQM = features.check("raqm")
 
 # ==========================================
-# 📊 تابع ثبت رفتار کاربر در دیتابیس (اصلاح‌شده)
+# 📊 تابع ثبت رفتار کاربر در دیتابیس (اصلاح نهایی)
 # ==========================================
 def log_event(user_id, event_name):
     try:
+        url = f"{SUPABASE_URL}/rest/v1/user_events"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
         data = {
             "user_id": user_id,
             "event_name": event_name
         }
-        result = supabase.table('user_events').insert(data).execute()
-        return True
-    except Exception as e:
-        error_msg = f"❌ خطای ثبت لاگ: {e}"
-        print(error_msg)
-        try:
+        response = requests.post(url, json=data, headers=headers, timeout=10)
+        
+        if response.status_code in [200, 201]:
+            return True
+        else:
+            error_msg = f"❌ خطای دیتابیس (کد {response.status_code}): {response.text}"
+            print(error_msg)
+            # این خط خطا رو به خودت توی تلگرام می‌فرسته
             requests.post(
                 f"https://api.telegram.org/bot{TOKEN}/sendMessage",
                 data={"chat_id": ADMIN_ID, "text": error_msg[:1000]},
                 timeout=5
             )
-        except Exception:
-            pass
+            return False
+    except Exception as e:
+        error_msg = f"❌ خطای اتصال: {e}"
+        print(error_msg)
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={"chat_id": ADMIN_ID, "text": error_msg[:1000]},
+            timeout=5
+        )
         return False
 
 # ==========================================
@@ -654,5 +670,5 @@ if __name__ == '__main__':
     
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     
-    print("ربات روشن شد. سیستم لاگ‌برداری بدون metadata فعال شد...")
+    print("ربات روشن شد. سیستم لاگ‌برداری با requests فعال شد...")
     app.run_polling()

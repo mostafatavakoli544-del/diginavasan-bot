@@ -497,30 +497,55 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ==========================================
-# 📅 تبدیل تاریخ (اصلاح‌شده)
+# 📅 تبدیل تاریخ (اصلاح‌شده و ضدخطا)
 # ==========================================
 DATE_INPUT = 30
 async def date_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📅 <b>تبدیل تاریخ</b>\n\nلطفاً یک تاریخ را با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01 یا 2024/07/22):\n\n<i>ربات به صورت هوشمند تشخیص می‌دهد شمسی است یا میلادی.</i>", parse_mode='HTML')
+    await update.message.reply_text(
+        "📅 <b>تبدیل تاریخ</b>\n\nلطفاً یک تاریخ را با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01 یا 2024/07/22):\n\n<i>اعداد فارسی و انگلیسی هر دو قبول است.</i>", 
+        parse_mode='HTML',
+        reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True)
+    )
     return DATE_INPUT
+
 async def date_get_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text.strip()
+    
+    # اگر کاربر روی دکمه‌های منو کلیک کرد، از حالت خارج شو
+    menu_keywords = ["استارت", "منوی اصلی", "قیمت ارزها", "قیمت طلا", "قیمت ارز دیجیتال", "ماشین‌حساب طلا", "ماشین‌حساب اقساط", "مبدل هوشمند ارز", "وضعیت آب‌وهوا", "آلارم قیمتی", "چت با هوش مصنوعی", "دعوت از دوستان"]
+    if any(kw in raw_text for kw in menu_keywords):
+        await handle_menu_text(update, context)
+        return ConversationHandler.END
+        
     try:
-        parts = re.split(r'[\/\-\s]+', raw_text)
-        if len(parts) != 3: raise ValueError
+        # تبدیل اعداد فارسی و عربی به انگلیسی
+        persian_digits = "۰۱۲۳۴۵۶۷۸۹"
+        arabic_digits = "٠١٢٣٤٥٦٧٨٩"
+        english_digits = "0123456789"
+        translation_table = str.maketrans(persian_digits + arabic_digits, english_digits + english_digits)
+        raw_text = raw_text.translate(translation_table)
+        
+        # یکسان‌سازی جداکننده‌ها (خط تیره، نقطه، بک‌اسلش به اسلش)
+        raw_text = raw_text.replace('-', '/').replace('.', '/').replace('\\', '/').replace(' ', '/')
+        
+        parts = [p for p in raw_text.split('/') if p]
+        if len(parts) != 3: 
+            raise ValueError("تعداد اجزا نامعتبر است")
+        
         nums = [int(p) for p in parts]
         a, b, c = nums[0], nums[1], nums[2]
         
+        # تشخیص هوشمند سال
         if a > 1500: y, m, d = a, b, c
         elif c > 1500: y, m, d = c, b, a
         else: y, m, d = a, b, c
 
-        if y > 1500: 
+        if y > 1500: # میلادی
             miladi = datetime(y, m, d)
             shamsi = jdatetime.date.fromgregorian(date=miladi)
             ghamari = convert.Gregorian(y, m, d).to_hijri()
             msg = f"📅 <b>نتیجه تبدیل تاریخ</b>\n\n📆 میلادی: {y}/{m}/{d}\n☀️ شمسی: {shamsi.year}/{shamsi.month}/{shamsi.day}\n🌙 قمری: {ghamari.year}/{ghamari.month}/{ghamari.day}"
-        else: 
+        else: # شمسی
             shamsi = jdatetime.date(y, m, d)
             miladi = shamsi.togregorian()
             ghamari = convert.Jalali(y, m, d).to_hijri()
@@ -528,9 +553,15 @@ async def date_get_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(f"{msg}\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
         return ConversationHandler.END
+        
     except Exception:
-        await update.message.reply_text("فرمت وارد شده صحیح نیست. لطفاً دقیقاً مثل 1403/05/01 وارد کنید:\n(برای بازگشت به منو روی دکمه زیر بزنید)", reply_markup=get_main_menu())
-        return ConversationHandler.END
+        # اگر خطا داد، در حالت تبدیل تاریخ می‌مانیم تا کاربر دوباره تلاش کند
+        await update.message.reply_text(
+            "❌ تاریخ وارد شده معتبر نیست.\nلطفاً دقیقاً با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01).\n\n<i>برای انصراف روی «لغو» بزنید.</i>", 
+            parse_mode='HTML',
+            reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True)
+        )
+        return DATE_INPUT
 
 # ==========================================
 # 🌤 وضعیت آب‌وهوا
@@ -589,7 +620,17 @@ if __name__ == '__main__':
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("مبدل هوشمند ارز"), currency_conv_start)], states={CURRENCY_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, conv_get_amt)], CURRENCY_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, conv_get_type)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
     
-    app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("تبدیل تاریخ"), date_conv_start)], states={DATE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, date_get_input)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
+    # هندلر تاریخ با Fallbackهای کامل
+    app.add_handler(ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("تبدیل تاریخ"), date_conv_start)], 
+        states={DATE_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, date_get_input)]}, 
+        fallbacks=[
+            CommandHandler('cancel', cancel), 
+            MessageHandler(filters.Regex("^لغو$"), cancel),
+            MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🧮 ماشین‌حساب طلا|💸 ماشین‌حساب اقساط|💱 مبدل هوشمند ارز|📅 تبدیل تاریخ|🌤 وضعیت آب‌وهوا|🚨 آلارم قیمتی|🤖 چت با هوش مصنوعی)$"), handle_menu_text)
+        ], 
+        allow_reentry=True
+    ))
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("وضعیت آب‌وهوا"), weather_start)], states={WEATHER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, weather_get_city)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
     
@@ -606,5 +647,5 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    print("ربات روشن شد. هوش مصنوعی و تمامی ابزارها فعال شدند...")
+    print("ربات روشن شد. هوش مصنوعی و تبدیل تاریخ اصلاح شدند...")
     app.run_polling()

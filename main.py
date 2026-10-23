@@ -12,10 +12,10 @@ from bidi.algorithm import get_display
 from io import BytesIO
 from datetime import datetime, time
 from PIL import Image, ImageDraw, ImageFont, features
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, Chat, ChatMember
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, 
-    ConversationHandler, MessageHandler, filters
+    ConversationHandler, MessageHandler, filters, ChatMemberHandler
 )
 from supabase import create_client, Client
 
@@ -30,6 +30,10 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
+# --- تنظیمات Upstash ---
+UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
+UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 TEMPLATES = {
@@ -42,6 +46,42 @@ TEMPLATES = {
 HAS_RAQM = features.check("raqm")
 user_alerts = {}
 
+# ==========================================
+# 📦 توابع دیتابیس Upstash (برای ذخیره کانال‌ها)
+# ==========================================
+def upstash_request(command_path):
+    """ارسال دستور به Upstash از طریق REST API"""
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        logging.error("Upstash URL or Token is missing!")
+        return None
+    try:
+        url = f"{UPSTASH_REDIS_REST_URL}/{command_path}"
+        headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("result")
+    except Exception as e:
+        logging.error(f"Upstash connection error: {e}")
+    return None
+
+def add_channel_to_db(chat_id):
+    """اضافه کردن کانال به دیتابیس (استفاده از Set)"""
+    upstash_request(f"sadd/diginavasan_channels/{chat_id}")
+    logging.info(f"Channel {chat_id} added to Upstash DB.")
+
+def remove_channel_from_db(chat_id):
+    """حذف کانال از دیتابیس"""
+    upstash_request(f"srem/diginavasan_channels/{chat_id}")
+    logging.info(f"Channel {chat_id} removed from Upstash DB.")
+
+def get_all_channels_from_db():
+    """دریافت لیست تمام کانال‌ها"""
+    result = upstash_request("smembers/diginavasan_channels")
+    return result if isinstance(result, list) else []
+
+# ==========================================
+# 📊 لاگ‌های سوپابیس (موقت)
+# ==========================================
 def log_event(user_id, event_name):
     try:
         url = f"{SUPABASE_URL}/rest/v1/user_events"
@@ -138,6 +178,60 @@ def get_ai_response(prompt):
     except Exception as e:
         return f"❌ خطا: {str(e)}"
 
+# ==========================================
+# 🔄 سیستم مدیریت کانال‌ها (متصل به Upstash)
+# ==========================================
+async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    result = update.my_chat_member
+    if not result:
+        return
+    
+    was_member = result.old_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
+    is_member = result.new_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
+    
+    chat = update.effective_chat
+    
+    if chat.type in [Chat.CHANNEL, Chat.GROUP, Chat.SUPERGROUP]:
+        if not was_member and is_member:
+            add_channel_to_db(chat.id)
+        elif was_member and not is_member:
+            remove_channel_from_db(chat.id)
+
+async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
+    channels = get_all_channels_from_db()
+    if not channels:
+        return
+        
+    try:
+        img_bio = await asyncio.to_thread(generate_infographic)
+        caption = (
+            "📊 **خلاصه وضعیت بازار**\n\n"
+            "💰 کانال ما: @diginavasan\n"
+            "🤖 ربات ما: @diginavasan_bot"
+        )
+        
+        for chat_id in channels:
+            try:
+                bio_copy = BytesIO(img_bio.getvalue())
+                bio_copy.name = 'summary.jpeg'
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=bio_copy,
+                    caption=caption,
+                    parse_mode='Markdown'
+                )
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logging.error(f"خطا در ارسال به کانال {chat_id}: {e}")
+                # اگر ربات از کانال حذف شده بود، از دیتابیس هم پاکش کن
+                if "kicked" in str(e).lower() or "not found" in str(e).lower():
+                    remove_channel_from_db(chat_id)
+    except Exception as e:
+        logging.error(f"خطا در ساخت عکس برای کانال‌های خارجی: {e}")
+
+# ==========================================
+# 🚨 آلارم‌ها و تصویرسازی
+# ==========================================
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
     global user_alerts
     for user_id in list(user_alerts.keys()):
@@ -286,6 +380,9 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await jobs[_rotation_index % len(jobs)](context)
     _rotation_index += 1
 
+# ==========================================
+# 🧠 منو و هندلرها
+# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
@@ -541,6 +638,7 @@ if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     
+    # هندلرهای منو و مکالمه
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب طلا"), gold_calc_start)], states={PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)], WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)], AJRAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ajrat)], PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_profit)], TAX: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tax)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)], allow_reentry=True))
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب اقساط"), loan_calc_start)], states={LOAN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_amt)], LOAN_INT: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_int)], LOAN_MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_months)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)], allow_reentry=True))
@@ -553,14 +651,22 @@ if __name__ == '__main__':
 
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("چت با هوش مصنوعی"), ai_chat_start)], states={AI_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_message)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^لغو$"), cancel)], allow_reentry=True))
 
+    # هندلرهای عمومی و کانال‌ها
     app.add_handler(CommandHandler('start', start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
     
+    # تشخیص اضافه شدن ربات به کانال‌ها (متصل به Upstash)
+    app.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
+    
+    # زمان‌بندی‌ها
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    print("ربات روشن شد. تبدیل تاریخ حذف شد. سایر ابزارها فعال هستند...")
+    # ارسال ساعتی به کانال‌های خارجی (متصل به Upstash)
+    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=60)
+    
+    print("ربات روشن شد. سیستم ذخیره کانال‌ها به Upstash متصل شد...")
     app.run_polling()

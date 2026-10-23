@@ -9,6 +9,7 @@ import jdatetime
 import urllib.parse
 import arabic_reshaper
 import re
+import asyncio
 from bidi.algorithm import get_display
 from io import BytesIO
 from hijri_converter import convert
@@ -30,6 +31,8 @@ ADMIN_ID = 718840144
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 TEMPLATES = {
@@ -110,6 +113,33 @@ def download_image(url, size=(60, 60)):
         return img.resize(size, Image.Resampling.LANCZOS)
     except Exception:
         return None
+
+# ==========================================
+# 🤖 تابع اتصال به هوش مصنوعی Groq
+# ==========================================
+def get_ai_response(prompt):
+    try:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant for a Persian Telegram bot named Diginavasan. Always answer in Persian."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1024
+        }
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"❌ خطا در ارتباط با هوش مصنوعی (کد {response.status_code}): {response.text}"
+    except Exception as e:
+        return f"❌ خطا: {str(e)}"
 
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
     global user_alerts
@@ -265,6 +295,7 @@ def get_main_menu():
         [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه"), KeyboardButton("🪙 قیمت ارز دیجیتال")],
         [KeyboardButton("🧮 ماشین‌حساب طلا"), KeyboardButton("💸 ماشین‌حساب اقساط"), KeyboardButton("💱 مبدل هوشمند ارز")],
         [KeyboardButton("📅 تبدیل تاریخ"), KeyboardButton("🌤 وضعیت آب‌وهوا"), KeyboardButton("🚨 آلارم قیمتی")],
+        [KeyboardButton("🤖 چت با هوش مصنوعی")],
         [KeyboardButton("🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
@@ -315,6 +346,8 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await weather_start(update, context)
     elif "آلارم قیمتی" in text:
         await alert_start(update, context)
+    elif "چت با هوش مصنوعی" in text:
+        await ai_chat_start(update, context)
     elif "دعوت از دوستان" in text:
         log_event(user_id, "view_invite_menu")
         try:
@@ -332,6 +365,31 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
         except: pass
 
+# ==========================================
+# 🤖 هندلر چت با هوش مصنوعی
+# ==========================================
+AI_CHAT = 60
+async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🤖 **چت با هوش مصنوعی (Groq)**\n\nسوال خودت رو بپرس، من جواب می‌دم! (برای خروج روی دکمه «لغو» بزن)", reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True, one_time_keyboard=True))
+    return AI_CHAT
+
+async def ai_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text
+    if user_text == "لغو":
+        return await cancel(update, context)
+    
+    await update.message.reply_text("⏳ در حال فکر کردن...", reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True))
+    response_text = await asyncio.to_thread(get_ai_response, user_text)
+    
+    if len(response_text) > 4000:
+        response_text = response_text[:4000] + "\n\n...(ادامه پیام کوتاه شد)"
+        
+    await update.message.reply_text(response_text, reply_markup=ReplyKeyboardMarkup([["لغو"]], resize_keyboard=True))
+    return AI_CHAT
+
+# ==========================================
+# 🧮 ماشین‌حساب طلا
+# ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🧮 <b>ماشین‌حساب طلا</b>\n\nلطفاً قیمت هر گرم طلای ۱۸ عیار را <b>به تومان</b> وارد کنید:\n(راهنما: قیمت لحظه‌ای بازار {get_nerkh_price_safe(['gold'])} تومان است)", parse_mode='HTML')
@@ -372,10 +430,14 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ <b>فاکتور محاسبه طلا</b>\n\n⚖️ وزن: {w} گرم\n💰 قیمت پایه: {base:,.0f}\n🛠 اجرت ({a}%): {aj:,.0f}\n📈 سود ({pr}%): {prof:,.0f}\n🧾 مالیات ({t}%): {tax:,.0f}\n➖➖➖➖➖➖➖➖\n💳 <b>قیمت نهایی: {final:,.0f} تومان</b>\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:"); return TAX
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
+# ==========================================
+# 💸 ماشین‌حساب اقساط
+# ==========================================
 LOAN_AMT, LOAN_INT, LOAN_MONTHS = range(10, 13)
 async def loan_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💸 <b>ماشین‌حساب اقساط وام</b>\n\nلطفاً مبلغ کل وام را <b>به تومان</b> وارد کنید (مثلاً 100000000):", parse_mode='HTML')
@@ -405,6 +467,9 @@ async def loan_get_months(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:"); return LOAN_MONTHS
 
+# ==========================================
+# 💱 مبدل هوشمند ارز
+# ==========================================
 CURRENCY_AMT, CURRENCY_TYPE = range(20, 22)
 async def currency_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💱 <b>مبدل هوشمند ارز</b>\n\nلطفاً مبلغ را به <b>تومان</b> وارد کنید (مثلاً 5000000):", parse_mode='HTML')
@@ -431,6 +496,9 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"💱 {amt:,.0f} تومان معادل <b>{result:,.4f} {choice}</b> است.\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
     return ConversationHandler.END
 
+# ==========================================
+# 📅 تبدیل تاریخ (اصلاح‌شده)
+# ==========================================
 DATE_INPUT = 30
 async def date_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📅 <b>تبدیل تاریخ</b>\n\nلطفاً یک تاریخ را با فرمت <b>سال/ماه/روز</b> وارد کنید (مثلاً 1403/05/01 یا 2024/07/22):\n\n<i>ربات به صورت هوشمند تشخیص می‌دهد شمسی است یا میلادی.</i>", parse_mode='HTML')
@@ -464,6 +532,9 @@ async def date_get_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("فرمت وارد شده صحیح نیست. لطفاً دقیقاً مثل 1403/05/01 وارد کنید:\n(برای بازگشت به منو روی دکمه زیر بزنید)", reply_markup=get_main_menu())
         return ConversationHandler.END
 
+# ==========================================
+# 🌤 وضعیت آب‌وهوا
+# ==========================================
 WEATHER_CITY = 40
 async def weather_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🌤 <b>وضعیت آب‌وهوا</b>\n\nلطفاً نام شهر خود را وارد کنید (مثلاً تهران یا Mashhad):", parse_mode='HTML')
@@ -483,6 +554,9 @@ async def weather_get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("خطا در دریافت اطلاعات آب‌وهوا.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
+# ==========================================
+# 🚨 آلارم قیمتی
+# ==========================================
 ALERT_ASSET, ALERT_PRICE = range(50, 52)
 async def alert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["دلار", "طلا", "بیت‌کوین"], ["لغو"]]
@@ -521,6 +595,8 @@ if __name__ == '__main__':
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("آلارم قیمتی"), alert_start)], states={ALERT_ASSET: [MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_asset)], ALERT_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, alert_get_price)]}, fallbacks=[CommandHandler('cancel', cancel)], allow_reentry=True))
 
+    app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("چت با هوش مصنوعی"), ai_chat_start)], states={AI_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_message)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^لغو$"), cancel)], allow_reentry=True))
+
     app.add_handler(CommandHandler('start', start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
     
@@ -530,5 +606,5 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    print("ربات روشن شد. ابزارهای جدید و تبدیل تاریخ اصلاح‌شده فعال شدند...")
+    print("ربات روشن شد. هوش مصنوعی و تمامی ابزارها فعال شدند...")
     app.run_polling()

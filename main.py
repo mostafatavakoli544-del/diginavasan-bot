@@ -29,8 +29,6 @@ ADMIN_ID = 718840144
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
-# --- تنظیمات Upstash ---
 UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
 
@@ -47,10 +45,9 @@ HAS_RAQM = features.check("raqm")
 user_alerts = {}
 
 # ==========================================
-# 📦 توابع دیتابیس Upstash (برای ذخیره کانال‌ها)
+# 📦 توابع Upstash
 # ==========================================
 def upstash_request(command_path):
-    """ارسال دستور به Upstash از طریق REST API"""
     if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
         logging.error("Upstash URL or Token is missing!")
         return None
@@ -60,24 +57,27 @@ def upstash_request(command_path):
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             return response.json().get("result")
+        else:
+            logging.error(f"Upstash error response: {response.status_code} - {response.text}")
     except Exception as e:
         logging.error(f"Upstash connection error: {e}")
     return None
 
 def add_channel_to_db(chat_id):
-    """اضافه کردن کانال به دیتابیس (استفاده از Set)"""
     upstash_request(f"sadd/diginavasan_channels/{chat_id}")
     logging.info(f"Channel {chat_id} added to Upstash DB.")
 
 def remove_channel_from_db(chat_id):
-    """حذف کانال از دیتابیس"""
     upstash_request(f"srem/diginavasan_channels/{chat_id}")
     logging.info(f"Channel {chat_id} removed from Upstash DB.")
 
 def get_all_channels_from_db():
-    """دریافت لیست تمام کانال‌ها"""
     result = upstash_request("smembers/diginavasan_channels")
-    return result if isinstance(result, list) else []
+    if isinstance(result, list):
+        logging.info(f"Retrieved {len(result)} channels from Upstash: {result}")
+        return result
+    logging.warning(f"Unexpected response from Upstash smembers: {result}")
+    return []
 
 # ==========================================
 # 📊 لاگ‌های سوپابیس (موقت)
@@ -85,12 +85,7 @@ def get_all_channels_from_db():
 def log_event(user_id, event_name):
     try:
         url = f"{SUPABASE_URL}/rest/v1/user_events"
-        headers = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=representation"
-        }
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
         data = {"user_id": user_id, "event_name": event_name}
         requests.post(url, json=data, headers=headers, timeout=5)
     except Exception:
@@ -151,24 +146,17 @@ def download_image(url, size=(60, 60)):
     except Exception:
         return None
 
-# ==========================================
-# 🤖 تابع اتصال به هوش مصنوعی Groq
-# ==========================================
 def get_ai_response(prompt):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
         data = {
             "model": "openai/gpt-oss-120b",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant for a Persian Telegram bot named Diginavasan. Always answer in Persian."},
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.7,
-            "max_tokens": 1024
+            "temperature": 0.7, "max_tokens": 1024
         }
         response = requests.post(url, headers=headers, json=data, timeout=30)
         if response.status_code == 200:
@@ -178,19 +166,15 @@ def get_ai_response(prompt):
     except Exception as e:
         return f"❌ خطا: {str(e)}"
 
-# ==========================================
-# 🔄 سیستم مدیریت کانال‌ها (متصل به Upstash)
-# ==========================================
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.my_chat_member
     if not result:
+        logging.warning("Received update without my_chat_member")
         return
-    
     was_member = result.old_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
     is_member = result.new_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
-    
     chat = update.effective_chat
-    
+    logging.info(f"Chat member update: {chat.id}, was_member: {was_member}, is_member: {is_member}")
     if chat.type in [Chat.CHANNEL, Chat.GROUP, Chat.SUPERGROUP]:
         if not was_member and is_member:
             add_channel_to_db(chat.id)
@@ -198,40 +182,28 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             remove_channel_from_db(chat.id)
 
 async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
+    logging.info("Running hourly summary job for external channels...")
     channels = get_all_channels_from_db()
     if not channels:
+        logging.warning("No external channels found in Upstash DB.")
         return
-        
     try:
         img_bio = await asyncio.to_thread(generate_infographic)
-        caption = (
-            "📊 **خلاصه وضعیت بازار**\n\n"
-            "💰 کانال ما: @diginavasan\n"
-            "🤖 ربات ما: @diginavasan_bot"
-        )
-        
+        caption = ("📊 **خلاصه وضعیت بازار**\n\n💰 کانال ما: @diginavasan\n🤖 ربات ما: @diginavasan_bot")
         for chat_id in channels:
             try:
                 bio_copy = BytesIO(img_bio.getvalue())
                 bio_copy.name = 'summary.jpeg'
-                await context.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=bio_copy,
-                    caption=caption,
-                    parse_mode='Markdown'
-                )
-                await asyncio.sleep(0.5)
+                await context.bot.send_photo(chat_id=chat_id, photo=bio_copy, caption=caption, parse_mode='Markdown')
+                logging.info(f"Summary sent to channel {chat_id} successfully.")
+                await asyncio.sleep(1)
             except Exception as e:
-                logging.error(f"خطا در ارسال به کانال {chat_id}: {e}")
-                # اگر ربات از کانال حذف شده بود، از دیتابیس هم پاکش کن
+                logging.error(f"Failed to send to channel {chat_id}: {e}")
                 if "kicked" in str(e).lower() or "not found" in str(e).lower():
                     remove_channel_from_db(chat_id)
     except Exception as e:
-        logging.error(f"خطا در ساخت عکس برای کانال‌های خارجی: {e}")
+        logging.error(f"Error generating infographic for external channels: {e}")
 
-# ==========================================
-# 🚨 آلارم‌ها و تصویرسازی
-# ==========================================
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
     global user_alerts
     for user_id in list(user_alerts.keys()):
@@ -239,29 +211,17 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
             asset = alert['asset']
             target = alert['target']
             current_price = 0
-            
-            if asset == 'دلار':
-                current_price = int(get_nerkh_price_safe(["dollar"]).replace(',', ''))
-            elif asset == 'طلا':
-                current_price = int(get_nerkh_price_safe(["gold"]).replace(',', ''))
+            if asset == 'دلار': current_price = int(get_nerkh_price_safe(["dollar"]).replace(',', ''))
+            elif asset == 'طلا': current_price = int(get_nerkh_price_safe(["gold"]).replace(',', ''))
             elif asset == 'بیت‌کوین':
                 crypto = get_crypto_prices_toman()
-                if 'BTC' in crypto:
-                    current_price = int(crypto['BTC'].replace(',', ''))
-            
+                if 'BTC' in crypto: current_price = int(crypto['BTC'].replace(',', ''))
             if current_price > 0 and current_price >= target:
                 try:
-                    await context.bot.send_message(
-                        chat_id=user_id,
-                        text=f"🚨 <b>آلارم قیمتی شما فعال شد!</b>\n\nقیمت <b>{asset}</b> به {current_price:,.0f} تومان رسیده است (هدف شما: {target:,.0f} تومان).",
-                        parse_mode='HTML'
-                    )
+                    await context.bot.send_message(chat_id=user_id, text=f"🚨 <b>آلارم قیمتی شما فعال شد!</b>\n\nقیمت <b>{asset}</b> به {current_price:,.0f} تومان رسیده است (هدف شما: {target:,.0f} تومان).", parse_mode='HTML')
                     user_alerts[user_id].remove(alert)
-                except Exception:
-                    pass
-        
-        if not user_alerts[user_id]:
-            del user_alerts[user_id]
+                except Exception: pass
+        if not user_alerts[user_id]: del user_alerts[user_id]
 
 def create_gradient_bg(w, h):
     base = Image.new('RGB', (w, h), (15, 25, 45))
@@ -380,9 +340,6 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await jobs[_rotation_index % len(jobs)](context)
     _rotation_index += 1
 
-# ==========================================
-# 🧠 منو و هندلرها
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
@@ -638,7 +595,6 @@ if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # هندلرهای منو و مکالمه
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب طلا"), gold_calc_start)], states={PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_price)], WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_weight)], AJRAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ajrat)], PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_profit)], TAX: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tax)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)], allow_reentry=True))
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب اقساط"), loan_calc_start)], states={LOAN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_amt)], LOAN_INT: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_int)], LOAN_MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND, loan_get_months)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال)$"), handle_menu_text)], allow_reentry=True))
@@ -651,22 +607,18 @@ if __name__ == '__main__':
 
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("چت با هوش مصنوعی"), ai_chat_start)], states={AI_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ai_chat_message)]}, fallbacks=[CommandHandler('cancel', cancel), MessageHandler(filters.Regex("^لغو$"), cancel)], allow_reentry=True))
 
-    # هندلرهای عمومی و کانال‌ها
     app.add_handler(CommandHandler('start', start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
-    
-    # تشخیص اضافه شدن ربات به کانال‌ها (متصل به Upstash)
     app.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
     
-    # زمان‌بندی‌ها
     tehran_tz = pytz.timezone('Asia/Tehran')
     app.job_queue.run_daily(send_morning_message, time=time(8, 0, tzinfo=tehran_tz))
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    # ارسال ساعتی به کانال‌های خارجی (متصل به Upstash)
-    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=60)
+    # 🚨 اینجا زمان‌بندی برای تست، روی ۶۰ ثانیه (۱ دقیقه) تنظیم شده است
+    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=60, first=10)
     
-    print("ربات روشن شد. سیستم ذخیره کانال‌ها به Upstash متصل شد...")
-    app.run_polling()
+    print("ربات روشن شد. زمان‌بندی ارسال به کانال‌ها روی ۱ دقیقه (برای تست) تنظیم شد...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

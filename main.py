@@ -8,6 +8,7 @@ import pytz
 import urllib.parse
 import arabic_reshaper
 import asyncio
+import json
 from bidi.algorithm import get_display
 from io import BytesIO
 from datetime import datetime, time
@@ -80,17 +81,33 @@ def get_all_channels_from_db():
     return []
 
 # ==========================================
-# 📊 لاگ‌های سوپابیس (موقت)
+# 📊 لاگ‌های Upstash (اصلاح‌شده)
 # ==========================================
 def log_event(user_id, event_name):
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        return
     try:
-        url = f"{SUPABASE_URL}/rest/v1/user_events"
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
-        data = {"user_id": user_id, "event_name": event_name}
-        requests.post(url, json=data, headers=headers, timeout=5)
-    except Exception:
-        pass
+        # ساخت یک ساختار JSON برای ذخیره اطلاعات
+        event_data = json.dumps({
+            "user_id": user_id,
+            "event_name": event_name,
+            "created_at": datetime.now().isoformat()
+        })
+        
+        # تبدیل به فرمت URL برای ارسال به Upstash
+        encoded_data = urllib.parse.quote(event_data)
+        
+        # ذخیره در یک لیست به اسم diginavasan_events
+        url = f"{UPSTASH_REDIS_REST_URL}/lpush/diginavasan_events/{encoded_data}"
+        headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+        requests.get(url, headers=headers, timeout=5)
+        
+    except Exception as e:
+        logging.error(f"Upstash log_event error: {e}")
 
+# ==========================================
+# 🛠 سایر توابع پایه
+# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
@@ -183,7 +200,6 @@ async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
     logging.info("Running hourly summary job for external channels...")
     channels = get_all_channels_from_db()
     if not channels:
-        logging.warning("No external channels found in Upstash DB.")
         return
     try:
         img_bio = await asyncio.to_thread(generate_infographic)
@@ -386,14 +402,19 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log_event(user_id, "open_gold_calculator")
         await gold_calc_start(update, context)
     elif "ماشین‌حساب اقساط" in text:
+        log_event(user_id, "open_loan_calculator")
         await loan_calc_start(update, context)
     elif "مبدل هوشمند ارز" in text:
+        log_event(user_id, "open_currency_converter")
         await currency_conv_start(update, context)
     elif "وضعیت آب‌وهوا" in text:
+        log_event(user_id, "open_weather")
         await weather_start(update, context)
     elif "آلارم قیمتی" in text:
+        log_event(user_id, "open_alert")
         await alert_start(update, context)
     elif "چت با هوش مصنوعی" in text:
+        log_event(user_id, "open_ai_chat")
         await ai_chat_start(update, context)
     elif "دعوت از دوستان" in text:
         log_event(user_id, "view_invite_menu")
@@ -615,9 +636,7 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
-    
-    # ⏰ زمان‌بندی به حالت ۱ ساعت (۳۶۰۰ ثانیه) برگشت
     app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. زمان‌بندی به حالت ۱ ساعت برگشت...")
+    print("ربات روشن شد. لاگ‌ها به Upstash منتقل شدند...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

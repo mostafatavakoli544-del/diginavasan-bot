@@ -169,12 +169,10 @@ def get_ai_response(prompt):
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.my_chat_member
     if not result:
-        logging.warning("Received update without my_chat_member")
         return
     was_member = result.old_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
     is_member = result.new_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
     chat = update.effective_chat
-    logging.info(f"Chat member update: {chat.id}, was_member: {was_member}, is_member: {is_member}")
     if chat.type in [Chat.CHANNEL, Chat.GROUP, Chat.SUPERGROUP]:
         if not was_member and is_member:
             add_channel_to_db(chat.id)
@@ -189,12 +187,15 @@ async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         img_bio = await asyncio.to_thread(generate_infographic)
-        caption = ("📊 **خلاصه وضعیت بازار**\n\n💰 کانال ما: @diginavasan\n🤖 ربات ما: @diginavasan_bot")
+        # 👇 این خط اصلاح شد (Markdown به HTML تغییر کرد)
+        caption = "📊 <b>خلاصه وضعیت بازار</b>\n\n💰 کانال ما: @diginavasan\n🤖 ربات ما: @diginavasan_bot"
+        
         for chat_id in channels:
             try:
                 bio_copy = BytesIO(img_bio.getvalue())
                 bio_copy.name = 'summary.jpeg'
-                await context.bot.send_photo(chat_id=chat_id, photo=bio_copy, caption=caption, parse_mode='Markdown')
+                # 👇 این خط هم اصلاح شد (parse_mode به HTML تغییر کرد)
+                await context.bot.send_photo(chat_id=chat_id, photo=bio_copy, caption=caption, parse_mode='HTML')
                 logging.info(f"Summary sent to channel {chat_id} successfully.")
                 await asyncio.sleep(1)
             except Exception as e:
@@ -617,8 +618,8 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    # 🚨 اینجا زمان‌بندی برای تست، روی ۶۰ ثانیه (۱ دقیقه) تنظیم شده است
+    # زمان‌بندی روی ۶۰ ثانیه برای تست
     app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=60, first=10)
     
-    print("ربات روشن شد. زمان‌بندی ارسال به کانال‌ها روی ۱ دقیقه (برای تست) تنظیم شد...")
+    print("ربات روشن شد. سیستم با اصلاح کپشن (HTML) برای تست روی 1 دقیقه تنظیم شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

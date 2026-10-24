@@ -45,7 +45,6 @@ TEMPLATES = {
 HAS_RAQM = features.check("raqm")
 user_alerts = {}
 
-# برای جلوگیری از باگ گیر کردن در منو، تمام دکمه‌های منو رو یکجا تعریف می‌کنیم
 MENU_BUTTONS_REGEX = "^(🚀 استارت / منوی اصلی|🎁 دعوت از دوستان|💱 قیمت ارزها|🌕 قیمت طلا و سکه|🪙 قیمت ارز دیجیتال|🧮 ماشین‌حساب طلا|💸 ماشین‌حساب اقساط|💱 مبدل هوشمند ارز|🌤 وضعیت آب‌وهوا|🚨 آلارم قیمتی|🤖 چت با هوش مصنوعی)$"
 
 # ==========================================
@@ -58,29 +57,46 @@ def upstash_request(command_path):
         headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200: return response.json().get("result")
-    except Exception as e:
-        logging.error(f"Upstash connection error: {e}")
+    except Exception: pass
     return None
 
-def add_channel_to_db(chat_id):
-    upstash_request(f"sadd/diginavasan_channels/{chat_id}")
-
-def remove_channel_from_db(chat_id):
-    upstash_request(f"srem/diginavasan_channels/{chat_id}")
-
+def add_channel_to_db(chat_id): upstash_request(f"sadd/diginavasan_channels/{chat_id}")
+def remove_channel_from_db(chat_id): upstash_request(f"srem/diginavasan_channels/{chat_id}")
 def get_all_channels_from_db():
     result = upstash_request("smembers/diginavasan_channels")
     return result if isinstance(result, list) else []
+
+# --- سیستم دعوت و سهمیه ---
+def add_invite_to_user(inviter_id):
+    upstash_request(f"incr/user_invites_{inviter_id}")
+
+def get_user_invites(user_id):
+    res = upstash_request(f"get/user_invites_{user_id}")
+    return int(res) if res else 0
+
+def get_today_str():
+    return datetime.now().strftime("%Y-%m-%d")
+
+def get_ai_usage(user_id):
+    res = upstash_request(f"get/ai_usage_{user_id}_{get_today_str()}")
+    return int(res) if res else 0
+
+def increment_ai_usage(user_id):
+    key = f"ai_usage_{user_id}_{get_today_str()}"
+    upstash_request(f"incr/{key}")
+    upstash_request(f"expire/{key}/86400") # سهمیه هر ۲۴ ساعت ریست میشه
 
 def log_event(user_id, event_name):
     if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN: return
     try:
         event_data = json.dumps({"user_id": user_id, "event_name": event_name, "created_at": datetime.now().isoformat()})
         encoded_data = urllib.parse.quote(event_data)
-        url = f"{UPSTASH_REDIS_REST_URL}/lpush/diginavasan_events/{encoded_data}"
-        requests.get(url, headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}, timeout=5)
+        requests.get(f"{UPSTASH_REDIS_REST_URL}/lpush/diginavasan_events/{encoded_data}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}, timeout=5)
     except Exception: pass
 
+# ==========================================
+# 🛠 سایر توابع پایه
+# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
@@ -123,8 +139,7 @@ def get_crypto_prices_toman():
     except Exception: return {}
 
 def download_image(url, size=(60, 60)):
-    try:
-        return Image.open(BytesIO(requests.get(url, timeout=5).content)).convert("RGBA").resize(size, Image.Resampling.LANCZOS)
+    try: return Image.open(BytesIO(requests.get(url, timeout=5).content)).convert("RGBA").resize(size, Image.Resampling.LANCZOS)
     except Exception: return None
 
 def get_ai_response(prompt):
@@ -158,8 +173,7 @@ async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
                 bio_copy = BytesIO(img_bio.getvalue()); bio_copy.name = 'summary.jpeg'
                 await context.bot.send_photo(chat_id=chat_id, photo=bio_copy, caption=caption, parse_mode='HTML')
                 await asyncio.sleep(1)
-            except Exception:
-                remove_channel_from_db(chat_id)
+            except Exception: remove_channel_from_db(chat_id)
     except Exception: pass
 
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
@@ -180,18 +194,15 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
                 except Exception: pass
         if not user_alerts[user_id]: del user_alerts[user_id]
 
+# --- توابع گرافیکی (بدون تغییر) ---
 def create_gradient_bg(w, h):
     base = Image.new('RGB', (w, h), (15, 25, 45)); draw = ImageDraw.Draw(base)
-    for y in range(h):
-        draw.line([(0, y), (w, y)], fill=(int(15 + (5 - 15) * y / h), int(25 + (10 - 25) * y / h), int(45 + (20 - 45) * y / h)))
+    for y in range(h): draw.line([(0, y), (w, y)], fill=(int(15 + (5 - 15) * y / h), int(25 + (10 - 25) * y / h), int(45 + (20 - 45) * y / h)))
     return base
-
 def create_gold_gradient(w, h):
     base = Image.new('RGB', (w, h)); draw = ImageDraw.Draw(base)
-    for x in range(w):
-        draw.line([(x, 0), (x, h)], fill=(int(218 + (184 - 218) * x / w), int(165 + (134 - 165) * x / w), int(32 + (11 - 32) * x / w)))
+    for x in range(w): draw.line([(x, 0), (x, h)], fill=(int(218 + (184 - 218) * x / w), int(165 + (134 - 165) * x / w), int(32 + (11 - 32) * x / w)))
     return base
-
 def generate_infographic():
     font_path = "vazir.ttf"
     if not os.path.exists(font_path):
@@ -227,30 +238,26 @@ def generate_infographic():
         y = 1000 + (i * (1850-1000)/4) + ((1850-1000)/8); draw_text(fa(f"{name}:"), 940, y, font_text, (200, 200, 200), "rm"); draw_text(fa(price), 940 - draw.textlength(fa(f"{name}:"), font=font_text) - 20, y, font_text, (255, 215, 0), "rm")
     final_img = Image.alpha_composite(img, overlay); bio = BytesIO(); final_img.convert("RGB").save(bio, 'JPEG', quality=95); bio.seek(0); return bio
 
+# --- ارسال به کانال اصلی ---
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     msg = f"{TEMPLATES['fiat_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n💵 دلار = \u200e`{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n💶 یورو = \u200e`{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n💷 پوند = \u200e`{get_nerkh_price_safe(['pound', 'gbp'])}` تومان\n🇦🇪 درهم = \u200e`{get_nerkh_price_safe(['aed'])}` تومان\n🇹🇷 لیر = \u200e`{get_nerkh_price_safe(['lira'])}` تومان\n🇨🇳 یوان = \u200e`{get_nerkh_price_safe(['yuan'])}` تومان\n{TEMPLATES['footer']}"
     await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-
 async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     msg = f"{TEMPLATES['gold_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n🌕 طلا ۱۸ عیار = \u200e`{get_nerkh_price_safe(['gold'])}` تومان\n🪙 سکه امامی = \u200e`{get_nerkh_price_safe(['coin'])}` تومان\n🪙 سکه بهار = \u200e`{get_nerkh_price_safe(['bahar'])}` تومان\n🪙 نیم سکه = \u200e`{get_nerkh_price_safe(['half'])}` تومان\n🪙 ربع سکه = \u200e`{get_nerkh_price_safe(['quarter'])}` تومان\n{TEMPLATES['footer']}"
     await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-
 async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info(); crypto = get_crypto_prices_toman()
     msg = f"{TEMPLATES['crypto_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n"
     for sym, prc in crypto.items(): msg += f"🔸 {sym} = \u200e`{prc}` تومان\n"
     msg += TEMPLATES['footer']
     await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-
 async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     try: await context.bot.send_photo(chat_id=chat_id, photo=generate_infographic(), caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan", parse_mode='Markdown')
     except: pass
-
 async def send_morning_message(context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=CHANNEL_ID, text="🌅 **بسم الله الرحمن الرحیم**\nصبح بخیر! بازار امروز آغاز شد. ☀️\n\n*💰 دیجی نوسان 👇*\n@diginavasan", parse_mode='Markdown')
 async def send_night_message(context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=CHANNEL_ID, text="🌙 **پایان نرخ بازار**\nبازار تعطیل شد. شب خوبی رو برای شما و خانواده‌تون آرزو می‌کنیم. 🌹\n\n*💰 دیجی نوسان 👇*\n@diginavasan", parse_mode='Markdown')
-
 _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     if not is_working_hours(): return
@@ -258,6 +265,9 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel][_rotation_index % 4](context)
     _rotation_index += 1
 
+# ==========================================
+# 🧠 منو و کیبورد
+# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
@@ -268,21 +278,26 @@ def get_main_menu():
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, is_persistent=True)
 
-# 🛑 کیبورد لغو (برای خروج از حالت‌های گیر افتاده)
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup([["🔙 لغو / بازگشت"]], resize_keyboard=True)
 
+# ==========================================
+# 🚀 استارت و دعوت
+# ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id; first_name = update.effective_user.first_name or "کاربر"
     log_event(user_id, "start_bot")
-    invite_count = 0
-    try:
-        response = supabase.table('users').select('*').eq('user_id', user_id).execute()
-        if not response.data:
-            invited_by = int(context.args[0]) if context.args and context.args[0].isdigit() else None
-            supabase.table('users').insert({"user_id": user_id, "invited_by": invited_by}).execute()
-        else: invite_count = response.data[0].get('invite_count', 0)
-    except: pass
+    
+    # ثبت دعوت
+    if context.args and context.args[0].isdigit():
+        inviter_id = int(context.args[0])
+        if inviter_id != user_id: # کاربر خودش رو دعوت نکنه
+            # چک میکنیم ببینیم این کاربر قبلا اومده یا نه (برای اینکه با هر /start دوباره امتیاز نده)
+            is_new = upstash_request(f"sadd/bot_users/{user_id}")
+            if is_new == 1: # اگر کاربر جدید بود
+                add_invite_to_user(inviter_id)
+
+    invite_count = get_user_invites(user_id)
     welcome_msg = f"سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\n👥 تعداد دعوت‌های شما تاکنون: **{invite_count}** نفر\n\n👇 **از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
@@ -301,12 +316,8 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif "دعوت از دوستان" in text:
         log_event(user_id, "view_invite_menu")
         try:
-            invite_link = f"https://t.me/diginavasan_bot?start={user_id}"; invite_count = 0
-            try:
-                res = supabase.table('users').select('invite_count').eq('user_id', user_id).execute()
-                invite_count = res.data[0].get('invite_count', 0) if res.data else 0
-            except: pass
-            invite_text = f"🎁 <b>دعوت از دوستان به دیجی نوسان</b> 🌟\n\n👥 تعداد افرادی که تاکنون دعوت کرده‌اید: <b>{invite_count}</b> نفر\n\n🔗 <b>لینک اختصاصی دعوت شما:</b>\n{invite_link}\n\nبرای دعوت دوستانتان، از دکمه زیر استفاده کنید:"
+            invite_link = f"https://t.me/diginavasan_bot?start={user_id}"; invite_count = get_user_invites(user_id)
+            invite_text = f"🎁 <b>دعوت از دوستان به دیجی نوسان</b> 🌟\n\n👥 تعداد افرادی که تاکنون دعوت کرده‌اید: <b>{invite_count}</b> نفر\n\n🔗 <b>لینک اختصاصی دعوت شما:</b>\n{invite_link}\n\nبا دعوت از ۱ نفر، قابلیت هوش مصنوعی و آلارم قیمتی برای شما نامحدود می‌شود!\nبرای دعوت دوستانتان، از دکمه زیر استفاده کنید:"
             share_text = f"سلام! خواستم این کانال و ربات فوق‌العاده رو بهت معرفی کنم. 🤝\n\n📢 کانال دیجی نوسان:\n👉 https://t.me/diginavasan\n\n🤖 ربات اختصاصی دیجی نوسان:\n👉 {invite_link}"
             keyboard = [[InlineKeyboardButton("📤 ارسال به مخاطبین", url=f"https://t.me/share/url?url={invite_link}&text={urllib.parse.quote(share_text)}")]]
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
@@ -317,22 +328,47 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ==========================================
-# 🤖 چت با هوش مصنوعی
+# 🤖 چت با هوش مصنوعی (با سهمیه فریمیوم)
 # ==========================================
 AI_CHAT = 60
 async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 **چت با هوش مصنوعی (Groq)**\n\nسوال خودت رو بپرس، من جواب می‌دم! (برای خروج روی دکمه «لغو» بزن)", reply_markup=get_cancel_keyboard())
+    user_id = update.effective_user.id
+    invites = get_user_invites(user_id)
+    
+    if invites == 0 and get_ai_usage(user_id) >= 3:
+        # سهمیه تموم شده
+        invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+        msg = f"⚠️ <b>سهمیه رایگان امروز شما به پایان رسید!</b>\n\nشما امروز از ۳ سوال رایگان خود استفاده کرده‌اید.\nبرای استفاده <b>نامحدود</b> از هوش مصنوعی، کافیه فقط <b>۱ نفر</b> از دوستان خود را با لینک زیر به ربات دعوت کنید:\n\n🔗 <code>{invite_link}</code>\n\nبعد از دعوت، قفل هوش مصنوعی برای همیشه باز می‌شود."
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_menu())
+        return ConversationHandler.END
+    
+    remaining = 3 - get_ai_usage(user_id) if invites == 0 else "نامحدود"
+    await update.message.reply_text(f"🤖 **چت با هوش مصنوعی (Groq)**\n\nسهمیه باقیمانده امروز: {remaining}\n\nسوال خودت رو بپرس! (برای خروج روی دکمه «لغو» بزن)", reply_markup=get_cancel_keyboard())
     return AI_CHAT
+
 async def ai_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🔙 لغو / بازگشت": return await cancel(update, context)
+    user_id = update.effective_user.id
+    invites = get_user_invites(user_id)
+    
+    # چک مجدد سهمیه
+    if invites == 0 and get_ai_usage(user_id) >= 3:
+        return await ai_chat_start(update, context) # دوباره پیام قفل رو نشون بده
+    
     await update.message.reply_text("⏳ در حال فکر کردن...", reply_markup=get_cancel_keyboard())
     response_text = await asyncio.to_thread(get_ai_response, update.message.text)
     if len(response_text) > 4000: response_text = response_text[:4000] + "\n\n...(ادامه پیام کوتاه شد)"
-    await update.message.reply_text(response_text, reply_markup=get_cancel_keyboard())
+    
+    if invites == 0:
+        increment_ai_usage(user_id)
+        remaining = 3 - get_ai_usage(user_id)
+        response_text += f"\n\n---\n🔔 <i>سهمیه رایگان امروز شما: {remaining} سوال</i>"
+        
+    await update.message.reply_text(response_text, reply_markup=get_cancel_keyboard(), parse_mode='HTML')
     return AI_CHAT
 
 # ==========================================
-# 🧮 ماشین‌حساب طلا (اصلاح‌شده با قابلیت خروج)
+# 🧮 ماشین‌حساب طلا
 # ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,33 +491,51 @@ async def weather_get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ==========================================
-# 🚨 آلارم قیمتی
+# 🚨 آلارم قیمتی (با سهمیه فریمیوم)
 # ==========================================
 ALERT_ASSET, ALERT_PRICE = range(50, 52)
 async def alert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    invites = get_user_invites(user_id)
+    current_alerts = len(user_alerts.get(user_id, []))
+    
+    if invites == 0 and current_alerts >= 1:
+        invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
+        msg = f"⚠️ <b>شما ۱ آلارم رایگان خود را ثبت کرده‌اید.</b>\n\nبرای ثبت <b>نامحدود</b> آلارم قیمتی (طلا، دلار، بیت‌کوین)، کافیه فقط <b>۱ نفر</b> از دوستان خود را با لینک زیر به ربات دعوت کنید:\n\n🔗 <code>{invite_link}</code>\n\nبعد از دعوت، قفل آلارم‌ها برای همیشه باز می‌شود."
+        await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_menu())
+        return ConversationHandler.END
+
     keyboard = [["دلار", "طلا", "بیت‌کوین"], ["🔙 لغو / بازگشت"]]
     await update.message.reply_text("🚨 <b>تنظیم آلارم قیمتی</b>\n\nبرای کدام مورد می‌خواهید آلارم تنظیم کنید؟", parse_mode='HTML', reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True))
     return ALERT_ASSET
+
 async def alert_get_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🔙 لغو / بازگشت": return await cancel(update, context)
     context.user_data['alert_asset'] = update.message.text
     await update.message.reply_text(f"قیمت هدف برای {update.message.text} را به <b>تومان</b> وارد کنید (مثلاً 80000):", parse_mode='HTML', reply_markup=get_cancel_keyboard())
     return ALERT_PRICE
+
 async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🔙 لغو / بازگشت": return await cancel(update, context)
     try:
         target = int(update.message.text.replace(',', '')); user_id = update.effective_user.id
         if user_id not in user_alerts: user_alerts[user_id] = []
         user_alerts[user_id].append({'asset': context.user_data['alert_asset'], 'target': target})
-        await update.message.reply_text(f"✅ آلارم تنظیم شد.\n\nبه محض اینکه قیمت {context.user_data['alert_asset']} به {target:,.0f} تومان برسد، به شما اطلاع می‌دهم.\n(ربات هر ۵ دقیقه چک می‌کند)", reply_markup=get_main_menu())
+        
+        invites = get_user_invites(user_id)
+        limit_msg = "\n(شما به ۱ آلارم رایگان خود رسیده‌اید. برای آلارم بیشتر ۱ نفر را دعوت کنید)" if invites == 0 else ""
+        
+        await update.message.reply_text(f"✅ آلارم تنظیم شد.\n\nبه محض اینکه قیمت {context.user_data['alert_asset']} به {target:,.0f} تومان برسد، به شما اطلاع می‌دهم.\n(ربات هر ۵ دقیقه چک می‌کند){limit_msg}", reply_markup=get_main_menu())
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return ALERT_PRICE
 
+# ==========================================
+# ⚙️ اجرای ربات
+# ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # تنظیم Fallbackها برای اینکه اگر کاربر دکمه منو رو زد، از مکالمه خارج بشه
     fallbacks_list = [
         CommandHandler('cancel', cancel), 
         MessageHandler(filters.Regex("^🔙 لغو / بازگشت$"), cancel),
@@ -511,5 +565,5 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. سیستم خروج از ماشین‌حساب با دکمه لغو و منو اصلاح شد...")
+    print("ربات روشن شد. سیستم فریمیوم و دعوت‌نامه فعال شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

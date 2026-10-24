@@ -66,25 +66,18 @@ def get_all_channels_from_db():
     result = upstash_request("smembers/diginavasan_channels")
     return result if isinstance(result, list) else []
 
-# --- سیستم دعوت و سهمیه ---
-def add_invite_to_user(inviter_id):
-    upstash_request(f"incr/user_invites_{inviter_id}")
-
+def add_invite_to_user(inviter_id): upstash_request(f"incr/user_invites_{inviter_id}")
 def get_user_invites(user_id):
     res = upstash_request(f"get/user_invites_{user_id}")
     return int(res) if res else 0
-
-def get_today_str():
-    return datetime.now().strftime("%Y-%m-%d")
-
+def get_today_str(): return datetime.now().strftime("%Y-%m-%d")
 def get_ai_usage(user_id):
     res = upstash_request(f"get/ai_usage_{user_id}_{get_today_str()}")
     return int(res) if res else 0
-
 def increment_ai_usage(user_id):
     key = f"ai_usage_{user_id}_{get_today_str()}"
     upstash_request(f"incr/{key}")
-    upstash_request(f"expire/{key}/86400") # سهمیه هر ۲۴ ساعت ریست میشه
+    upstash_request(f"expire/{key}/86400")
 
 def log_event(user_id, event_name):
     if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN: return
@@ -94,9 +87,6 @@ def log_event(user_id, event_name):
         requests.get(f"{UPSTASH_REDIS_REST_URL}/lpush/diginavasan_events/{encoded_data}", headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}, timeout=5)
     except Exception: pass
 
-# ==========================================
-# 🛠 سایر توابع پایه
-# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
@@ -194,7 +184,6 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
                 except Exception: pass
         if not user_alerts[user_id]: del user_alerts[user_id]
 
-# --- توابع گرافیکی (بدون تغییر) ---
 def create_gradient_bg(w, h):
     base = Image.new('RGB', (w, h), (15, 25, 45)); draw = ImageDraw.Draw(base)
     for y in range(h): draw.line([(0, y), (w, y)], fill=(int(15 + (5 - 15) * y / h), int(25 + (10 - 25) * y / h), int(45 + (20 - 45) * y / h)))
@@ -238,7 +227,6 @@ def generate_infographic():
         y = 1000 + (i * (1850-1000)/4) + ((1850-1000)/8); draw_text(fa(f"{name}:"), 940, y, font_text, (200, 200, 200), "rm"); draw_text(fa(price), 940 - draw.textlength(fa(f"{name}:"), font=font_text) - 20, y, font_text, (255, 215, 0), "rm")
     final_img = Image.alpha_composite(img, overlay); bio = BytesIO(); final_img.convert("RGB").save(bio, 'JPEG', quality=95); bio.seek(0); return bio
 
-# --- ارسال به کانال اصلی ---
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
     msg = f"{TEMPLATES['fiat_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n💵 دلار = \u200e`{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n💶 یورو = \u200e`{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n💷 پوند = \u200e`{get_nerkh_price_safe(['pound', 'gbp'])}` تومان\n🇦🇪 درهم = \u200e`{get_nerkh_price_safe(['aed'])}` تومان\n🇹🇷 لیر = \u200e`{get_nerkh_price_safe(['lira'])}` تومان\n🇨🇳 یوان = \u200e`{get_nerkh_price_safe(['yuan'])}` تومان\n{TEMPLATES['footer']}"
@@ -265,9 +253,6 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel][_rotation_index % 4](context)
     _rotation_index += 1
 
-# ==========================================
-# 🧠 منو و کیبورد
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
@@ -281,21 +266,14 @@ def get_main_menu():
 def get_cancel_keyboard():
     return ReplyKeyboardMarkup([["🔙 لغو / بازگشت"]], resize_keyboard=True)
 
-# ==========================================
-# 🚀 استارت و دعوت
-# ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id; first_name = update.effective_user.first_name or "کاربر"
     log_event(user_id, "start_bot")
-    
-    # ثبت دعوت
     if context.args and context.args[0].isdigit():
         inviter_id = int(context.args[0])
-        if inviter_id != user_id: # کاربر خودش رو دعوت نکنه
-            # چک میکنیم ببینیم این کاربر قبلا اومده یا نه (برای اینکه با هر /start دوباره امتیاز نده)
+        if inviter_id != user_id:
             is_new = upstash_request(f"sadd/bot_users/{user_id}")
-            if is_new == 1: # اگر کاربر جدید بود
-                add_invite_to_user(inviter_id)
+            if is_new == 1: add_invite_to_user(inviter_id)
 
     invite_count = get_user_invites(user_id)
     welcome_msg = f"سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\n👥 تعداد دعوت‌های شما تاکنون: **{invite_count}** نفر\n\n👇 **از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
@@ -327,21 +305,15 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("عملیات لغو شد. به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🤖 چت با هوش مصنوعی (با سهمیه فریمیوم)
-# ==========================================
 AI_CHAT = 60
 async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     invites = get_user_invites(user_id)
-    
     if invites == 0 and get_ai_usage(user_id) >= 3:
-        # سهمیه تموم شده
         invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
         msg = f"⚠️ <b>سهمیه رایگان امروز شما به پایان رسید!</b>\n\nشما امروز از ۳ سوال رایگان خود استفاده کرده‌اید.\nبرای استفاده <b>نامحدود</b> از هوش مصنوعی، کافیه فقط <b>۱ نفر</b> از دوستان خود را با لینک زیر به ربات دعوت کنید:\n\n🔗 <code>{invite_link}</code>\n\nبعد از دعوت، قفل هوش مصنوعی برای همیشه باز می‌شود."
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_menu())
         return ConversationHandler.END
-    
     remaining = 3 - get_ai_usage(user_id) if invites == 0 else "نامحدود"
     await update.message.reply_text(f"🤖 **چت با هوش مصنوعی (Groq)**\n\nسهمیه باقیمانده امروز: {remaining}\n\nسوال خودت رو بپرس! (برای خروج روی دکمه «لغو» بزن)", reply_markup=get_cancel_keyboard())
     return AI_CHAT
@@ -350,26 +322,17 @@ async def ai_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🔙 لغو / بازگشت": return await cancel(update, context)
     user_id = update.effective_user.id
     invites = get_user_invites(user_id)
-    
-    # چک مجدد سهمیه
-    if invites == 0 and get_ai_usage(user_id) >= 3:
-        return await ai_chat_start(update, context) # دوباره پیام قفل رو نشون بده
-    
+    if invites == 0 and get_ai_usage(user_id) >= 3: return await ai_chat_start(update, context)
     await update.message.reply_text("⏳ در حال فکر کردن...", reply_markup=get_cancel_keyboard())
     response_text = await asyncio.to_thread(get_ai_response, update.message.text)
     if len(response_text) > 4000: response_text = response_text[:4000] + "\n\n...(ادامه پیام کوتاه شد)"
-    
     if invites == 0:
         increment_ai_usage(user_id)
         remaining = 3 - get_ai_usage(user_id)
         response_text += f"\n\n---\n🔔 <i>سهمیه رایگان امروز شما: {remaining} سوال</i>"
-        
     await update.message.reply_text(response_text, reply_markup=get_cancel_keyboard(), parse_mode='HTML')
     return AI_CHAT
 
-# ==========================================
-# 🧮 ماشین‌حساب طلا
-# ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🧮 <b>ماشین‌حساب طلا</b>\n\nلطفاً قیمت هر گرم طلای ۱۸ عیار را <b>به تومان</b> وارد کنید:\n(راهنما: قیمت لحظه‌ای بازار {get_nerkh_price_safe(['gold'])} تومان است)", parse_mode='HTML', reply_markup=get_cancel_keyboard())
@@ -412,9 +375,6 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return TAX
 
-# ==========================================
-# 💸 ماشین‌حساب اقساط
-# ==========================================
 LOAN_AMT, LOAN_INT, LOAN_MONTHS = range(10, 13)
 async def loan_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💸 <b>ماشین‌حساب اقساط وام</b>\n\nلطفاً مبلغ کل وام را <b>به تومان</b> وارد کنید (مثلاً 100000000):", parse_mode='HTML', reply_markup=get_cancel_keyboard())
@@ -444,9 +404,6 @@ async def loan_get_months(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return LOAN_MONTHS
 
-# ==========================================
-# 💱 مبدل هوشمند ارز
-# ==========================================
 CURRENCY_AMT, CURRENCY_TYPE = range(20, 22)
 async def currency_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💱 <b>مبدل هوشمند ارز</b>\n\nلطفاً مبلغ را به <b>تومان</b> وارد کنید (مثلاً 5000000):", parse_mode='HTML', reply_markup=get_cancel_keyboard())
@@ -471,9 +428,6 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"💱 {amt:,.0f} تومان معادل <b>{result:,.4f} {choice}</b> است.\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🌤 وضعیت آب‌وهوا
-# ==========================================
 WEATHER_CITY = 40
 async def weather_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🌤 <b>وضعیت آب‌وهوا</b>\n\nلطفاً نام شهر خود را وارد کنید (مثلاً تهران یا Mashhad):", parse_mode='HTML', reply_markup=get_cancel_keyboard())
@@ -490,47 +444,38 @@ async def weather_get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: await update.message.reply_text("خطا در دریافت اطلاعات آب‌وهوا.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🚨 آلارم قیمتی (با سهمیه فریمیوم)
-# ==========================================
 ALERT_ASSET, ALERT_PRICE = range(50, 52)
 async def alert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     invites = get_user_invites(user_id)
     current_alerts = len(user_alerts.get(user_id, []))
-    
     if invites == 0 and current_alerts >= 1:
         invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
         msg = f"⚠️ <b>شما ۱ آلارم رایگان خود را ثبت کرده‌اید.</b>\n\nبرای ثبت <b>نامحدود</b> آلارم قیمتی (طلا، دلار، بیت‌کوین)، کافیه فقط <b>۱ نفر</b> از دوستان خود را با لینک زیر به ربات دعوت کنید:\n\n🔗 <code>{invite_link}</code>\n\nبعد از دعوت، قفل آلارم‌ها برای همیشه باز می‌شود."
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=get_main_menu())
         return ConversationHandler.END
-
     keyboard = [["دلار", "طلا", "بیت‌کوین"], ["🔙 لغو / بازگشت"]]
     await update.message.reply_text("🚨 <b>تنظیم آلارم قیمتی</b>\n\nبرای کدام مورد می‌خواهید آلارم تنظیم کنید؟", parse_mode='HTML', reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True))
     return ALERT_ASSET
-
 async def alert_get_asset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🔙 لغو / بازگشت": return await cancel(update, context)
     context.user_data['alert_asset'] = update.message.text
     await update.message.reply_text(f"قیمت هدف برای {update.message.text} را به <b>تومان</b> وارد کنید (مثلاً 80000):", parse_mode='HTML', reply_markup=get_cancel_keyboard())
     return ALERT_PRICE
-
 async def alert_get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "🔙 لغو / بازگشت": return await cancel(update, context)
     try:
         target = int(update.message.text.replace(',', '')); user_id = update.effective_user.id
         if user_id not in user_alerts: user_alerts[user_id] = []
         user_alerts[user_id].append({'asset': context.user_data['alert_asset'], 'target': target})
-        
         invites = get_user_invites(user_id)
         limit_msg = "\n(شما به ۱ آلارم رایگان خود رسیده‌اید. برای آلارم بیشتر ۱ نفر را دعوت کنید)" if invites == 0 else ""
-        
         await update.message.reply_text(f"✅ آلارم تنظیم شد.\n\nبه محض اینکه قیمت {context.user_data['alert_asset']} به {target:,.0f} تومان برسد، به شما اطلاع می‌دهم.\n(ربات هر ۵ دقیقه چک می‌کند){limit_msg}", reply_markup=get_main_menu())
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return ALERT_PRICE
 
 # ==========================================
-# ⚙️ اجرای ربات
+# ⚙️ اجرای ربات (با فیلترهای اصلاح‌شده)
 # ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
@@ -555,7 +500,10 @@ if __name__ == '__main__':
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("چت با هوش مصنوعی"), ai_chat_start)], states={AI_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), ai_chat_message)]}, fallbacks=fallbacks_list, allow_reentry=True))
 
     app.add_handler(CommandHandler('start', start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
+    
+    # 👇 این خط جادویی: ربات فقط و فقط به پیام‌های چت خصوصی (PRIVATE) جواب می‌ده
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_menu_text))
+    
     app.add_handler(ChatMemberHandler(track_chats, ChatMemberHandler.MY_CHAT_MEMBER))
     
     tehran_tz = pytz.timezone('Asia/Tehran')
@@ -563,7 +511,9 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
+    
+    # ارسال خودکار به گروه‌های خارجی (فقط یک پیام در ساعت)
     app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. سیستم فریمیوم و دعوت‌نامه فعال شد...")
+    print("ربات روشن شد. حالت فقط ارسال به گروه‌ها (گوش دادن خاموش) فعال شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

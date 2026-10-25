@@ -598,8 +598,8 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     
-    # 🚨 این خط برای تست به ۱ دقیقه (۶۰ ثانیه) تغییر کرده است
-    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=60, first=10)
+    # زمان‌بندی به ۱ ساعت برگشت
+    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. ارسال عکس به گروه‌ها برای تست روی ۱ دقیقه تنظیم شد...")
+    print("ربات روشن شد. زمان‌بندی ارسال به گروه‌ها به ۱ ساعت برگشت...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

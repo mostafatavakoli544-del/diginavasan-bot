@@ -9,6 +9,7 @@ import urllib.parse
 import arabic_reshaper
 import asyncio
 import json
+import time as time_module # برای تایم استمپ
 from bidi.algorithm import get_display
 from io import BytesIO
 from datetime import datetime, time
@@ -261,6 +262,17 @@ async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
     channels = get_all_channels_from_db()
     if not channels: return
+    
+    # 👇 بررسی حافظه زمانی از Upstash 👇
+    last_time_str = upstash_request("get/last_broadcast_time")
+    now_timestamp = time_module.time()
+    
+    if last_time_str:
+        time_diff = now_timestamp - float(last_time_str)
+        if time_diff < 3550: # اگر کمتر از ۵۹ دقیقه گذشته باشه (با کمی ارفاق)
+            logging.info(f"Skipping broadcast, last sent {int(time_diff)} seconds ago.")
+            return
+
     try:
         img_bio = await asyncio.to_thread(generate_infographic)
         for chat_id in channels:
@@ -273,6 +285,11 @@ async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logging.error(f"Error sending to {chat_id}: {e}")
                 remove_channel_from_db(chat_id)
+                
+        # 👇 ذخیره زمان جدید در Upstash بعد از ارسال موفق 👇
+        upstash_request(f"set/last_broadcast_time/{now_timestamp}")
+        logging.info("Broadcast sent and time updated.")
+        
     except Exception: pass
 
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
@@ -566,13 +583,13 @@ if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
     
-    # 👇👇👇 اینجا فیلتر فیلتر چت خصوصی به تمام مکالمه‌ها اضافه شد 👇👇👇
     fallbacks_list = [
         CommandHandler('cancel', cancel), 
         MessageHandler(filters.Regex("^🔙 لغو / بازگشت$"), cancel),
         MessageHandler(filters.Regex(MENU_BUTTONS_REGEX), handle_menu_text)
     ]
 
+    # قفل کردن مکالمه‌ها فقط برای چت خصوصی (حل مشکل جواب دادن توی گروه)
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب طلا") & filters.ChatType.PRIVATE, gold_calc_start)], states={PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), get_price)], WEIGHT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), get_weight)], AJRAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), get_ajrat)], PROFIT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), get_profit)], TAX: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), get_tax)]}, fallbacks=fallbacks_list, allow_reentry=True))
     
     app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("ماشین‌حساب اقساط") & filters.ChatType.PRIVATE, loan_calc_start)], states={LOAN_AMT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), loan_get_amt)], LOAN_INT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), loan_get_int)], LOAN_MONTHS: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔙 لغو / بازگشت$"), loan_get_months)]}, fallbacks=fallbacks_list, allow_reentry=True))
@@ -598,7 +615,9 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
-    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. سیستم ضد اسپم (فقط چت خصوصی) فعال شد...")
+    # اجرای تابع بررسی زمان در هر دقیقه (اگر ۱ ساعت نشده باشه، پیام نمی‌فرسته)
+    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=60, first=10)
+    
+    print("ربات روشن شد. سیستم ضد اسپم و حافظه زمانی فعال شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

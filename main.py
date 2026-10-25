@@ -238,24 +238,41 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel][_rotation_index % 4](context)
     _rotation_index += 1
 
+# ==========================================
+# 🔄 سیستم گروه‌های خارجی (اصلاح شده: فقط با ادمین شدن پیام میده)
+# ==========================================
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.my_chat_member
     if not result: return
-    was_member = result.old_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
-    is_member = result.new_chat_member.status in [ChatMember.MEMBER, ChatMember.ADMINISTRATOR]
+    
+    old_status = result.old_chat_member.status
+    new_status = result.new_chat_member.status
     chat = update.effective_chat
+    
     if chat.type in [Chat.CHANNEL, Chat.GROUP, Chat.SUPERGROUP]:
-        if not was_member and is_member:
+        # 👇 اگر ربات تازه ادمین شده باشد (قبلاً ادمین نبوده)
+        if old_status != ChatMember.ADMINISTRATOR and new_status == ChatMember.ADMINISTRATOR:
             add_channel_to_db(chat.id)
+            
             adder_id = result.from_user.id if result.from_user else None
             if adder_id:
                 set_group_owner(chat.id, adder_id)
                 try:
-                    await context.bot.send_message(chat_id=adder_id, text=f"سلام! ممنون که ربات دیجی‌نوسان رو به گروه/کانال «{chat.title}» اضافه کردی. 🌹\n\nبرای اینکه ببینی چند نفر از طریق لینک این گروه عضو ربات ما شدن و چقدر پورسانت گرفتی، کافیه دستور /status رو بزنی.", parse_mode='HTML')
+                    await context.bot.send_message(
+                        chat_id=adder_id,
+                        text=f"سلام! ممنون که ربات دیجی‌نوسان رو به عنوان ادمین به گروه/کانال «{chat.title}» اضافه کردی. 🌹\n\nبرای اینکه ببینی چند نفر از طریق لینک این گروه عضو ربات ما شدن و چقدر پورسانت گرفتی، کافیه دستور /status رو بزنی.",
+                        parse_mode='HTML'
+                    )
                 except:
                     if result.from_user and result.from_user.username:
-                        await context.bot.send_message(chat_id=chat.id, text=f"@{result.from_user.username} عزیز، برای دریافت لینک اختصاصی و مشاهده آمار جذب ممبر، لطفاً به چت خصوصی ربات بیایید و /start را بزنید.")
-        elif was_member and not is_member: remove_channel_from_db(chat.id)
+                        await context.bot.send_message(
+                            chat_id=chat.id,
+                            text=f"@{result.from_user.username} عزیز، برای دریافت لینک اختصاصی و مشاهده آمار جذب ممبر، لطفاً به چت خصوصی ربات بیایید و /start را بزنید."
+                        )
+        
+        # 👇 اگر ربات از ادمینی خارج شد یا کلاً از گروه حذف شد
+        elif old_status == ChatMember.ADMINISTRATOR and new_status != ChatMember.ADMINISTRATOR:
+            remove_channel_from_db(chat.id)
 
 async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
     channels = get_all_channels_from_db()
@@ -311,7 +328,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id; first_name = update.effective_user.first_name or "کاربر"
     log_event(user_id, "start_bot")
     
-    # بررسی لینک دعوت (پارتنر یا گروه)
     if context.args:
         arg = context.args[0]
         if arg.startswith("group_"):
@@ -319,25 +335,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             partner_id = upstash_request(f"get/group_owner_{group_chat_id}")
             if partner_id: add_user_to_partner(user_id, partner_id)
         else:
-            # لینک دعوت معمولی (آیدی عددی دوست)
             try:
                 inviter_id = int(arg)
-                if inviter_id != user_id:
-                    add_user_to_partner(user_id, inviter_id)
-            except ValueError:
-                pass
+                if inviter_id != user_id: add_user_to_partner(user_id, inviter_id)
+            except ValueError: pass
 
     welcome_msg = f"سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\n👇 **از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
 # ==========================================
-# 📊 دستورات مخفی (Status و Admin Finance)
+# 📊 دستورات مخفی
 # ==========================================
 async def partner_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stats = get_partner_stats(user_id)
     if stats == 0:
-        await update.message.reply_text("شما هنوز هیچ کاربری را به ربات ما نیاورده‌اید. کافیه ربات را به گروه/کانال خود اضافه کنید تا لینک اختصاصی شما ساخته شود.")
+        await update.message.reply_text("شما هنوز هیچ کاربری را به ربات ما نیاورده‌اید. کافیه ربات را به گروه/کانال خود اضافه کنید و ادمین کنید تا لینک اختصاصی شما ساخته شود.")
         return
     await update.message.reply_text(f"📊 <b>وضعیت شریک بنیان‌گذار</b>\n\n👤 آیدی عددی شما: <code>{user_id}</code>\n👥 تعداد کاربرانی که از طریق شما وارد شده‌اند: <b>{stats} نفر</b>\n\n💰 <i>پاداش شما به محض رسیدن ربات به ۱۰,۰۰۰ ممبر و شروع اسپانسرشیپ‌ها، بر اساس همین تعداد محاسبه و پرداخت خواهد شد.</i>", parse_mode='HTML')
 
@@ -354,7 +367,7 @@ async def admin_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(report, parse_mode='HTML')
 
 # ==========================================
-# 🤖 چت با هوش مصنوعی (با دکمه اشتراک‌گذاری)
+# 🤖 چت با هوش مصنوعی
 # ==========================================
 AI_CHAT = 60
 async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -364,7 +377,6 @@ async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if invites == 0 and get_ai_usage(user_id) >= 3:
         invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
-        
         share_text = (
             "سلام رفیق! 👋\n\n"
             "یه ربات تلگرامی پیدا کردم که واقعاً به کارم میاد. اسمش @diginavasan_bot هست.\n\n"
@@ -381,8 +393,7 @@ async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         encoded_text = urllib.parse.quote(share_text)
         share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
         
-        msg = f"⚠️ <b>سهمیه رایگان امروز شما به پایان رسید!</b>\n\nشما امروز از ۳ سوال رایگان خود استفاده کرده‌اید.\nبرای استفاده <b>نامحدود</b> از هوش مصنوعی، کافیه فقط <b>۱ نفر</b> از دوستان خود را به ربات دعوت کنید.\n\nبرای دعوت، روی دکمه زیر بزنید و دوست خود را انتخاب کنید. بعد از اینکه دوستتان ربات را استارت کرد، قفل هوش مصنوعی برای شما باز می‌شود."
-        
+        msg = f"⚠️ <b>سهمیه رایگان امروز شما به پایان رسید!</b>\n\nشما امروز از ۳ سوال رایگان خود استفاده کرده‌اید.\nبرای استفاده <b>نامحدود</b> از هوش مصنوعی، کافیه فقط <b>۱ نفر</b> از دوستان خود را به ربات دعوت کنید.\n\nبرای دعوت، روی دکمه زیر بزنید و دوست خود را انتخاب کنید."
         keyboard = [[InlineKeyboardButton("📤 ارسال دعوت‌نامه به مخاطبین", url=share_url)]]
         
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
@@ -638,5 +649,5 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. سیستم دکمه دعوت اختصاصی فعال شد...")
+    print("ربات روشن شد. سیستم پارتنرها فقط با ادمین شدن فعال می‌شود...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

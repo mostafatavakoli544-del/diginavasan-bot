@@ -238,39 +238,23 @@ async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
     await [send_fiat_to_channel, send_gold_to_channel, send_crypto_to_channel, send_image_summary_to_channel][_rotation_index % 4](context)
     _rotation_index += 1
 
-# ==========================================
-# 🔄 سیستم گروه‌های خارجی (اصلاح شده: فقط با ادمین شدن پیام میده)
-# ==========================================
 async def track_chats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     result = update.my_chat_member
     if not result: return
-    
     old_status = result.old_chat_member.status
     new_status = result.new_chat_member.status
     chat = update.effective_chat
-    
     if chat.type in [Chat.CHANNEL, Chat.GROUP, Chat.SUPERGROUP]:
-        # 👇 اگر ربات تازه ادمین شده باشد (قبلاً ادمین نبوده)
         if old_status != ChatMember.ADMINISTRATOR and new_status == ChatMember.ADMINISTRATOR:
             add_channel_to_db(chat.id)
-            
             adder_id = result.from_user.id if result.from_user else None
             if adder_id:
                 set_group_owner(chat.id, adder_id)
                 try:
-                    await context.bot.send_message(
-                        chat_id=adder_id,
-                        text=f"سلام! ممنون که ربات دیجی‌نوسان رو به عنوان ادمین به گروه/کانال «{chat.title}» اضافه کردی. 🌹\n\nبرای اینکه ببینی چند نفر از طریق لینک این گروه عضو ربات ما شدن و چقدر پورسانت گرفتی، کافیه دستور /status رو بزنی.",
-                        parse_mode='HTML'
-                    )
+                    await context.bot.send_message(chat_id=adder_id, text=f"سلام! ممنون که ربات دیجی‌نوسان رو به عنوان ادمین به گروه/کانال «{chat.title}» اضافه کردی. 🌹\n\nبرای اینکه ببینی چند نفر از طریق لینک این گروه عضو ربات ما شدن و چقدر پورسانت گرفتی، کافیه دستور /status رو بزنی.", parse_mode='HTML')
                 except:
                     if result.from_user and result.from_user.username:
-                        await context.bot.send_message(
-                            chat_id=chat.id,
-                            text=f"@{result.from_user.username} عزیز، برای دریافت لینک اختصاصی و مشاهده آمار جذب ممبر، لطفاً به چت خصوصی ربات بیایید و /start را بزنید."
-                        )
-        
-        # 👇 اگر ربات از ادمینی خارج شد یا کلاً از گروه حذف شد
+                        await context.bot.send_message(chat_id=chat.id, text=f"@{result.from_user.username} عزیز، برای دریافت لینک اختصاصی و مشاهده آمار جذب ممبر، لطفاً به چت خصوصی ربات بیایید و /start را بزنید.")
         elif old_status == ChatMember.ADMINISTRATOR and new_status != ChatMember.ADMINISTRATOR:
             remove_channel_from_db(chat.id)
 
@@ -291,9 +275,6 @@ async def send_hourly_summary_to_externals(context: ContextTypes.DEFAULT_TYPE):
                 remove_channel_from_db(chat_id)
     except Exception: pass
 
-# ==========================================
-# 🧠 سیستم لاگ و منو
-# ==========================================
 async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
     global user_alerts
     for user_id in list(user_alerts.keys()):
@@ -327,7 +308,6 @@ def get_cancel_keyboard(): return ReplyKeyboardMarkup([["🔙 لغو / بازگ�
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id; first_name = update.effective_user.first_name or "کاربر"
     log_event(user_id, "start_bot")
-    
     if context.args:
         arg = context.args[0]
         if arg.startswith("group_"):
@@ -339,13 +319,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 inviter_id = int(arg)
                 if inviter_id != user_id: add_user_to_partner(user_id, inviter_id)
             except ValueError: pass
-
     welcome_msg = f"سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\n👇 **از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
     await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
 
-# ==========================================
-# 📊 دستورات مخفی
-# ==========================================
 async def partner_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stats = get_partner_stats(user_id)
@@ -366,15 +342,11 @@ async def admin_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report += f"\n➖➖➖➖➖➖➖➖\n👥 کل کاربران جذب‌شده توسط پارتنرها: <b>{total_members} نفر</b>\n💵 <i>برای محاسبه پورسانت، مبلغ کل تبلیغات را ضربدر ۴۰٪ کنید، سپس تقسیم بر کل ممبران کنید تا نرخ هر ممبر به دست آید.</i>"
     await update.message.reply_text(report, parse_mode='HTML')
 
-# ==========================================
-# 🤖 چت با هوش مصنوعی
-# ==========================================
 AI_CHAT = 60
 async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     log_event(user_id, "open_ai_chat")
     invites = get_user_invites(user_id)
-    
     if invites == 0 and get_ai_usage(user_id) >= 3:
         invite_link = f"https://t.me/diginavasan_bot?start={user_id}"
         share_text = (
@@ -389,16 +361,12 @@ async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "راستی، یه کانال هم دارن که هر روز صبح قیمت‌های بازار رو میذارن. اگه دوست داشتی اونجا هم عضو شو:\n"
             "👉 کانال: @diginavasan"
         ).format(invite_link=invite_link)
-        
         encoded_text = urllib.parse.quote(share_text)
         share_url = f"https://t.me/share/url?url={invite_link}&text={encoded_text}"
-        
         msg = f"⚠️ <b>سهمیه رایگان امروز شما به پایان رسید!</b>\n\nشما امروز از ۳ سوال رایگان خود استفاده کرده‌اید.\nبرای استفاده <b>نامحدود</b> از هوش مصنوعی، کافیه فقط <b>۱ نفر</b> از دوستان خود را به ربات دعوت کنید.\n\nبرای دعوت، روی دکمه زیر بزنید و دوست خود را انتخاب کنید."
         keyboard = [[InlineKeyboardButton("📤 ارسال دعوت‌نامه به مخاطبین", url=share_url)]]
-        
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
-        
     remaining = 3 - get_ai_usage(user_id) if invites == 0 else "نامحدود"
     await update.message.reply_text(f"🤖 **چت با هوش مصنوعی (Groq)**\n\nسهمیه باقیمانده امروز: {remaining}\n\nسوال خودت رو بپرس! (برای خروج روی دکمه «لغو» بزن)", reply_markup=get_cancel_keyboard())
     return AI_CHAT
@@ -418,9 +386,6 @@ async def ai_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response_text, reply_markup=get_cancel_keyboard(), parse_mode='HTML')
     return AI_CHAT
 
-# ==========================================
-# 🧮 ماشین‌حساب طلا
-# ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_gold_calculator")
@@ -465,9 +430,6 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return TAX
 
-# ==========================================
-# 💸 ماشین‌حساب اقساط
-# ==========================================
 LOAN_AMT, LOAN_INT, LOAN_MONTHS = range(10, 13)
 async def loan_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_loan_calculator")
@@ -499,9 +461,6 @@ async def loan_get_months(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return LOAN_MONTHS
 
-# ==========================================
-# 💱 مبدل هوشمند ارز
-# ==========================================
 CURRENCY_AMT, CURRENCY_TYPE = range(20, 22)
 async def currency_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_currency_converter")
@@ -528,9 +487,6 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"💱 {amt:,.0f} تومان معادل <b>{result:,.4f} {choice}</b> است.\n\n💰 @diginavasan", parse_mode='HTML', reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🌤 وضعیت آب‌وهوا
-# ==========================================
 WEATHER_CITY = 40
 async def weather_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_weather")
@@ -548,9 +504,6 @@ async def weather_get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: await update.message.reply_text("خطا در دریافت اطلاعات آب‌وهوا.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🚨 آلارم قیمتی
-# ==========================================
 ALERT_ASSET, ALERT_PRICE = range(50, 52)
 async def alert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_alert")
@@ -609,9 +562,6 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
         except: pass
 
-# ==========================================
-# ⚙️ اجرای ربات
-# ==========================================
 if __name__ == '__main__':
     threading.Thread(target=run_dummy_server, daemon=True).start()
     app = ApplicationBuilder().token(TOKEN).build()
@@ -647,7 +597,9 @@ if __name__ == '__main__':
     app.job_queue.run_daily(send_night_message, time=time(20, 0, tzinfo=tehran_tz))
     app.job_queue.run_repeating(rotate_jobs, interval=900, first=10)
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
-    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. سیستم پارتنرها فقط با ادمین شدن فعال می‌شود...")
+    # 🚨 این خط برای تست به ۱ دقیقه (۶۰ ثانیه) تغییر کرده است
+    app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=60, first=10)
+    
+    print("ربات روشن شد. ارسال عکس به گروه‌ها برای تست روی ۱ دقیقه تنظیم شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

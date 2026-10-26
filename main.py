@@ -37,18 +37,15 @@ UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 TEMPLATES = {
-    "fiat_title": "💱 **قیمت لحظه‌ای ارزها**",
-    "gold_title": "🌕 **قیمت لحظه‌ای طلا و سکه**",
-    "crypto_title": "🪙 **قیمت لحظه‌ای ارز دیجیتال**",
-    "footer": "\n\n💰 **کانال ما:** @diginavasan\n🤖 **ربات اختصاصی ما:** @diginavasan_bot"
+    "fiat_title": "💱 <b>قیمت لحظه‌ای ارزها</b>",
+    "gold_title": "🌕 <b>قیمت لحظه‌ای طلا و سکه</b>",
+    "crypto_title": "🪙 <b>قیمت لحظه‌ای ارز دیجیتال</b>",
+    "footer": "\n\n💰 <b>کانال ما:</b> @diginavasan\n🤖 <b>ربات اختصاصی ما:</b> @diginavasan_bot"
 }
 
 HAS_RAQM = features.check("raqm")
 user_alerts = {}
 
-# ==========================================
-# 📦 توابع Upstash
-# ==========================================
 def upstash_request(command_path, method="GET"):
     if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN: return None
     try:
@@ -104,9 +101,6 @@ def get_all_channels_from_db():
     result = upstash_request("smembers/diginavasan_channels")
     return result if isinstance(result, list) else []
 
-# ==========================================
-# 🛠 توابع پایه و دریافت قیمت (با سیستم ضد کرش)
-# ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
@@ -162,9 +156,6 @@ def get_ai_response(prompt):
         else: return f"❌ خطا: {response.text}"
     except Exception as e: return f"❌ خطا: {str(e)}"
 
-# ==========================================
-# 🎨 گرافیک
-# ==========================================
 def create_gradient_bg(w, h):
     base = Image.new('RGB', (w, h), (15, 25, 45)); draw = ImageDraw.Draw(base)
     for y in range(h): draw.line([(0, y), (w, y)], fill=(int(15 + (5 - 15) * y / h), int(25 + (10 - 25) * y / h), int(45 + (20 - 45) * y / h)))
@@ -208,32 +199,29 @@ def generate_infographic():
         y = 1000 + (i * (1850-1000)/4) + ((1850-1000)/8); draw_text(fa(f"{name}:"), 940, y, font_text, (200, 200, 200), "rm"); draw_text(fa(price), 940 - draw.textlength(fa(f"{name}:"), font=font_text) - 20, y, font_text, (255, 215, 0), "rm")
     final_img = Image.alpha_composite(img, overlay); bio = BytesIO(); final_img.convert("RGB").save(bio, 'JPEG', quality=95); bio.seek(0); return bio
 
-# ==========================================
-# 📢 ارسال‌ها
-# ==========================================
 async def send_fiat_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
-    msg = f"{TEMPLATES['fiat_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n💵 دلار = \u200e`{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n💶 یورو = \u200e`{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n💷 پوند = \u200e`{get_nerkh_price_safe(['pound', 'gbp'])}` تومان\n🇦🇪 درهم = \u200e`{get_nerkh_price_safe(['aed'])}` تومان\n🇹🇷 لیر = \u200e`{get_nerkh_price_safe(['lira'])}` تومان\n🇨🇳 یوان = \u200e`{get_nerkh_price_safe(['yuan'])}` تومان\n{TEMPLATES['footer']}"
-    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+    msg = f"{TEMPLATES['fiat_title']}\n⏰ ساعت آپدیت: <code>{time_str}</code>\n\n💵 دلار = <code>{get_nerkh_price_safe(['dollar', 'usd'])}</code> تومان\n💶 یورو = <code>{get_nerkh_price_safe(['euro', 'eur'])}</code> تومان\n💷 پوند = <code>{get_nerkh_price_safe(['pound', 'gbp'])}</code> تومان\n🇦🇪 درهم = <code>{get_nerkh_price_safe(['aed'])}</code> تومان\n🇹🇷 لیر = <code>{get_nerkh_price_safe(['lira'])}</code> تومان\n🇨🇳 یوان = <code>{get_nerkh_price_safe(['yuan'])}</code> تومان\n{TEMPLATES['footer']}"
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
 
 async def send_gold_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info()
-    msg = f"{TEMPLATES['gold_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n🌕 طلا ۱۸ عیار = \u200e`{get_nerkh_price_safe(['gold'])}` تومان\n🪙 سکه امامی = \u200e`{get_nerkh_price_safe(['coin'])}` تومان\n🪙 سکه بهار = \u200e`{get_nerkh_price_safe(['bahar'])}` تومان\n🪙 نیم سکه = \u200e`{get_nerkh_price_safe(['half'])}` تومان\n🪙 ربع سکه = \u200e`{get_nerkh_price_safe(['quarter'])}` تومان\n{TEMPLATES['footer']}"
-    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+    msg = f"{TEMPLATES['gold_title']}\n⏰ ساعت آپدیت: <code>{time_str}</code>\n\n🌕 طلا ۱۸ عیار = <code>{get_nerkh_price_safe(['gold'])}</code> تومان\n🪙 سکه امامی = <code>{get_nerkh_price_safe(['coin'])}</code> تومان\n🪙 سکه بهار = <code>{get_nerkh_price_safe(['bahar'])}</code> تومان\n🪙 نیم سکه = <code>{get_nerkh_price_safe(['half'])}</code> تومان\n🪙 ربع سکه = <code>{get_nerkh_price_safe(['quarter'])}</code> تومان\n{TEMPLATES['footer']}"
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
 
 async def send_crypto_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
     time_str, _ = get_dates_info(); crypto = get_crypto_prices_toman()
-    msg = f"{TEMPLATES['crypto_title']}\n⏰ ساعت آپدیت: \u200e`{time_str}`\n\n"
-    for sym, prc in crypto.items(): msg += f"🔸 {sym} = \u200e`{prc}` تومان\n"
+    msg = f"{TEMPLATES['crypto_title']}\n⏰ ساعت آپدیت: <code>{time_str}</code>\n\n"
+    for sym, prc in crypto.items(): msg += f"🔸 {sym} = <code>{prc}</code> تومان\n"
     msg += TEMPLATES['footer']
-    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+    await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode='HTML')
 
 async def send_image_summary_to_channel(context: ContextTypes.DEFAULT_TYPE, chat_id=CHANNEL_ID):
-    try: await context.bot.send_photo(chat_id=chat_id, photo=generate_infographic(), caption="📊 **خلاصه وضعیت بازار**\n\n💰 @diginavasan\n🤖 @diginavasan_bot", parse_mode='Markdown')
+    try: await context.bot.send_photo(chat_id=chat_id, photo=generate_infographic(), caption="📊 <b>خلاصه وضعیت بازار</b>\n\n💰 @diginavasan\n🤖 @diginavasan_bot", parse_mode='HTML')
     except: pass
 
-async def send_morning_message(context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=CHANNEL_ID, text="🌅 **بسم الله الرحمن الرحیم**\nصبح بخیر! بازار امروز آغاز شد. ☀️\n\n*💰 دیجی نوسان 👇*\n@diginavasan", parse_mode='Markdown')
-async def send_night_message(context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=CHANNEL_ID, text="🌙 **پایان نرخ بازار**\nبازار تعطیل شد. شب خوبی رو برای شما و خانواده‌تون آرزو می‌کنیم. 🌹\n\n*💰 دیجی نوسان 👇*\n@diginavasan", parse_mode='Markdown')
+async def send_morning_message(context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=CHANNEL_ID, text="🌅 <b>بسم الله الرحمن الرحیم</b>\nصبح بخیر! بازار امروز آغاز شد. ☀️\n\n<b>💰 دیجی نوسان 👇</b>\n@diginavasan", parse_mode='HTML')
+async def send_night_message(context: ContextTypes.DEFAULT_TYPE): await context.bot.send_message(chat_id=CHANNEL_ID, text="🌙 <b>پایان نرخ بازار</b>\nبازار تعطیل شد. شب خوبی رو برای شما و خانواده‌تون آرزو می‌کنیم. 🌹\n\n<b>💰 دیجی نوسان 👇</b>\n@diginavasan", parse_mode='HTML')
 
 _rotation_index = 0
 async def rotate_jobs(context: ContextTypes.DEFAULT_TYPE):
@@ -302,9 +290,6 @@ async def check_alerts(context: ContextTypes.DEFAULT_TYPE):
                 except Exception: pass
         if not user_alerts[user_id]: del user_alerts[user_id]
 
-# ==========================================
-# 🧠 منوی اصلی و کیبورد
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton("🚀 استارت / منوی اصلی")],
@@ -319,9 +304,6 @@ def get_main_menu():
 
 def get_cancel_keyboard(): return ReplyKeyboardMarkup([["🔙 لغو / بازگشت"]], resize_keyboard=True)
 
-# ==========================================
-# 🚀 استارت
-# ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id; first_name = update.effective_user.first_name or "کاربر"
     log_event(user_id, "start_bot")
@@ -338,26 +320,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if inviter_id != user_id: add_user_to_partner(user_id, inviter_id)
             except ValueError: pass
 
-    welcome_msg = f"سلام **{first_name}** عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\n👇 **از منوی زیر یکی از گزینه‌ها را انتخاب کنید:**"
-    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu())
+    welcome_msg = f"سلام <b>{first_name}</b> عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\n👇 <b>از منوی زیر یکی از گزینه‌ها را انتخاب کنید:</b>"
+    await context.bot.send_message(chat_id=user_id, text=welcome_msg, parse_mode='HTML', reply_markup=get_main_menu())
 
-# ==========================================
-# 📊 فراخوانی دکمه‌های قیمت (با مدیریت خطا)
-# ==========================================
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip(); user_id = update.effective_user.id; chat_id = update.effective_chat.id
     try:
         if "استارت" in text or "منوی اصلی" in text: 
             await start(update, context)
         elif "قیمت ارزها" in text: 
-            log_event(user_id, "view_fiat_prices")
-            await send_fiat_to_channel(context, chat_id=chat_id)
+            log_event(user_id, "view_fiat_prices"); await send_fiat_to_channel(context, chat_id=chat_id)
         elif "قیمت طلا و سکه" in text: 
-            log_event(user_id, "view_gold_prices")
-            await send_gold_to_channel(context, chat_id=chat_id)
+            log_event(user_id, "view_gold_prices"); await send_gold_to_channel(context, chat_id=chat_id)
         elif "قیمت ارز دیجیتال" in text: 
-            log_event(user_id, "view_crypto_prices")
-            await send_crypto_to_channel(context, chat_id=chat_id)
+            log_event(user_id, "view_crypto_prices"); await send_crypto_to_channel(context, chat_id=chat_id)
         elif "ماشین‌حساب طلا" in text: await gold_calc_start(update, context)
         elif "ماشین‌حساب اقساط" in text: await loan_calc_start(update, context)
         elif "مبدل هوشمند ارز" in text: await currency_conv_start(update, context)
@@ -384,12 +360,8 @@ async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [[InlineKeyboardButton("📤 ارسال دعوت‌نامه به مخاطبین", url=share_url)]]
             await context.bot.send_message(chat_id=chat_id, text=invite_text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
     except Exception as e:
-        # 👇 اگر API قطع بود یا خطایی شد، این پیام رو برات می‌فرسته تا بفهمی چرا قیمت نیومده
         await context.bot.send_message(chat_id=chat_id, text=f"❌ خطایی در دریافت اطلاعات رخ داد. (خطای فنی: {str(e)})")
 
-# ==========================================
-# 📊 دستورات مخفی
-# ==========================================
 async def partner_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stats = get_partner_stats(user_id)
@@ -410,9 +382,6 @@ async def admin_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report += f"\n➖➖➖➖➖➖➖➖\n👥 کل کاربران جذب‌شده توسط پارتنرها: <b>{total_members} نفر</b>\n💵 <i>برای محاسبه پورسانت، مبلغ کل تبلیغات را ضربدر ۴۰٪ کنید، سپس تقسیم بر کل ممبران کنید تا نرخ هر ممبر به دست آید.</i>"
     await update.message.reply_text(report, parse_mode='HTML')
 
-# ==========================================
-# 🤖 چت با هوش مصنوعی
-# ==========================================
 AI_CHAT = 60
 async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -435,7 +404,7 @@ async def ai_chat_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
         return ConversationHandler.END
     remaining = 3 - get_ai_usage(user_id) if invites == 0 else "نامحدود"
-    await update.message.reply_text(f"🤖 **چت با هوش مصنوعی (Groq)**\n\nسهمیه باقیمانده امروز: {remaining}\n\nسوال خودت رو بپرس! (برای خروج روی دکمه «لغو» بزن)", reply_markup=get_cancel_keyboard())
+    await update.message.reply_text(f"🤖 <b>چت با هوش مصنوعی (Groq)</b>\n\nسهمیه باقیمانده امروز: {remaining}\n\nسوال خودت رو بپرس! (برای خروج روی دکمه «لغو» بزن)", reply_markup=get_cancel_keyboard(), parse_mode='HTML')
     return AI_CHAT
 
 async def ai_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -453,9 +422,6 @@ async def ai_chat_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(response_text, reply_markup=get_cancel_keyboard(), parse_mode='HTML')
     return AI_CHAT
 
-# ==========================================
-# 🧮 ماشین‌حساب طلا
-# ==========================================
 PRICE, WEIGHT, AJRAT, PROFIT, TAX = range(5)
 async def gold_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_gold_calculator")
@@ -500,9 +466,6 @@ async def get_tax(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return TAX
 
-# ==========================================
-# 💸 ماشین‌حساب اقساط
-# ==========================================
 LOAN_AMT, LOAN_INT, LOAN_MONTHS = range(10, 13)
 async def loan_calc_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_loan_calculator")
@@ -534,9 +497,6 @@ async def loan_get_months(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     except ValueError: await update.message.reply_text("لطفاً فقط عدد وارد کنید:", reply_markup=get_cancel_keyboard()); return LOAN_MONTHS
 
-# ==========================================
-# 💱 مبدل هوشمند ارز
-# ==========================================
 CURRENCY_AMT, CURRENCY_TYPE = range(20, 22)
 async def currency_conv_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_currency_converter")
@@ -563,9 +523,6 @@ async def conv_get_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"💱 {amt:,.0f} تومان معادل <b>{result:,.4f} {choice}</b> است.\n\n💰 @diginavasan\n🤖 @diginavasan_bot", parse_mode='HTML', reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🌤 وضعیت آب‌وهوا
-# ==========================================
 WEATHER_CITY = 40
 async def weather_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_weather")
@@ -583,9 +540,6 @@ async def weather_get_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: await update.message.reply_text("خطا در دریافت اطلاعات آب‌وهوا.", reply_markup=get_main_menu())
     return ConversationHandler.END
 
-# ==========================================
-# 🚨 آلارم قیمتی
-# ==========================================
 ALERT_ASSET, ALERT_PRICE = range(50, 52)
 async def alert_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_event(update.effective_user.id, "open_alert")
@@ -657,5 +611,5 @@ if __name__ == '__main__':
     app.job_queue.run_repeating(check_alerts, interval=300, first=10)
     app.job_queue.run_repeating(send_hourly_summary_to_externals, interval=3600, first=10)
     
-    print("ربات روشن شد. حالت ضد باگ فعال شد...")
+    print("ربات روشن شد. فرمت پیام‌ها به HTML تغییر کرد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

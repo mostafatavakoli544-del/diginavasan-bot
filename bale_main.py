@@ -80,13 +80,13 @@ async def handle_message(message: Message) -> None:
             coin = await asyncio.to_thread(get_nerkh_price_safe, ['coin'])
             time_str, _ = get_dates_info()
             
-            msg = f"💱 <b>قیمت لحظه‌ای</b>\n⏰ <code>{time_str}</code>\n\n"
-            msg += f"💵 دلار = <code>{dollar}</code> تومان\n"
-            msg += f"💶 یورو = <code>{euro}</code> تومان\n"
-            msg += f"🌕 طلا ۱۸ = <code>{gold}</code> تومان\n"
-            msg += f"🪙 سکه امامی = <code>{coin}</code> تومان"
+            # 👇 استفاده از md.bold و md.code برای فرمت‌بندی بله 👇
+            msg = f"💱 {md.bold('قیمت لحظه‌ای')}\n⏰ {md.code(time_str)}\n\n"
+            msg += f"💵 دلار = {md.code(dollar)} تومان\n"
+            msg += f"💶 یورو = {md.code(euro)} تومان\n"
+            msg += f"🌕 طلا ۱۸ = {md.code(gold)} تومان\n"
+            msg += f"🪙 سکه امامی = {md.code(coin)} تومان"
             
-            # 👇 اینجا parse_mode رو حذف کردیم چون توی تنظیمات ربات به صورت پیش‌فرض HTML هست 👇
             await message.answer(msg)
         except Exception as e:
             await message.answer(f"❌ خطا در دریافت قیمت: {str(e)}")

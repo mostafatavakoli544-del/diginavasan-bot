@@ -6,13 +6,12 @@ import http.server
 import socketserver
 import pytz
 import asyncio
-from io import BytesIO
 from datetime import datetime, time
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.enums import ParseMode
 from baleio.filters import CommandStart
-from baleio.types import Message
+from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from supabase import create_client, Client
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -51,6 +50,25 @@ def get_nerkh_price_safe(keys_list):
         if price > 0: return f"{price:,.0f}"
     return "0"
 
+def get_crypto_prices_toman():
+    try:
+        # اضافه شدن ارزهای دیجیتال جدید مثل ترون، سولانا و...
+        coins = {
+            "BTC": "btc", "ETH": "eth", "USDT": "usdt", 
+            "BNB": "bnb", "TRX": "trx", "SOL": "sol", 
+            "DOGE": "doge", "TON": "ton"
+        }
+        prices = {}
+        for symbol, coin_id in coins.items():
+            url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={coin_id}&dstCurrency=rls"
+            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+            if res.status_code == 200:
+                key = f"{coin_id}-rls"
+                if key in res.json().get('stats', {}):
+                    prices[symbol] = f"{int(float(res.json()['stats'][key]['latest']) / 10):,.0f}"
+        return prices
+    except Exception: return {}
+
 def get_ai_response(prompt):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -61,36 +79,76 @@ def get_ai_response(prompt):
         else: return "خطایی در ارتباط با هوش مصنوعی رخ داد."
     except Exception: return "خطای اتصال به هوش مصنوعی."
 
+# --- ساخت منوی پایین صفحه دقیقاً شبیه عکس ---
+def get_main_menu():
+    keyboard = [
+        [KeyboardButton(text="🚀 استارت / منوی اصلی")],
+        [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
+        [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="🧮 ماشین‌حساب طلا")],
+        [KeyboardButton(text="💸 ماشین‌حساب اقساط"), KeyboardButton(text="💱 مبدل هوشمند ارز")],
+        [KeyboardButton(text="🌤 وضعیت آب‌وهوا"), KeyboardButton(text="🚨 آلارم قیمتی")],
+        [KeyboardButton(text="🤖 چت با هوش مصنوعی")],
+        [KeyboardButton(text="🎁 دعوت از دوستان")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
-    welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nبرای دریافت قیمت‌ها، کلمه «قیمت» یا دستور /price را بفرستید."
-    await message.answer(welcome)
+    welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاین یک نسخه آزمایشی است. از منوی زیر یکی از گزینه‌ها را انتخاب کنید:"
+    await message.answer(welcome, reply_markup=get_main_menu())
 
 @dp.message()
 async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
-    
-    if "price" in text.lower() or "قیمت" in text:
-        try:
-            dollar = await asyncio.to_thread(get_nerkh_price_safe, ['dollar'])
-            euro = await asyncio.to_thread(get_nerkh_price_safe, ['euro'])
-            gold = await asyncio.to_thread(get_nerkh_price_safe, ['gold'])
-            coin = await asyncio.to_thread(get_nerkh_price_safe, ['coin'])
-            time_str, _ = get_dates_info()
-            
-            # 👇 استفاده از md.bold و md.code برای فرمت‌بندی بله 👇
-            msg = f"💱 {md.bold('قیمت لحظه‌ای')}\n⏰ {md.code(time_str)}\n\n"
-            msg += f"💵 دلار = {md.code(dollar)} تومان\n"
-            msg += f"💶 یورو = {md.code(euro)} تومان\n"
-            msg += f"🌕 طلا ۱۸ = {md.code(gold)} تومان\n"
-            msg += f"🪙 سکه امامی = {md.code(coin)} تومان"
-            
-            await message.answer(msg)
-        except Exception as e:
-            await message.answer(f"❌ خطا در دریافت قیمت: {str(e)}")
+    time_str, _ = get_dates_info()
+
+    if text == "🚀 استارت / منوی اصلی" or text == "/start":
+        await command_start_handler(message)
+        
+    elif text == "💱 قیمت ارزها":
+        # لیست گسترده‌تر ارزها
+        msg = f"💱 {md.bold('قیمت لحظه‌ای ارزها')}\n⏰ {md.code(time_str)}\n\n"
+        msg += f"💵 دلار = {md.code(get_nerkh_price_safe(['dollar', 'usd']))} تومان\n"
+        msg += f"💶 یورو = {md.code(get_nerkh_price_safe(['euro', 'eur']))} تومان\n"
+        msg += f"💷 پوند = {md.code(get_nerkh_price_safe(['pound', 'gbp']))} تومان\n"
+        msg += f"🇦🇪 درهم = {md.code(get_nerkh_price_safe(['aed']))} تومان\n"
+        msg += f"🇹🇷 لیر = {md.code(get_nerkh_price_safe(['lira']))} تومان\n"
+        msg += f"🇨🇳 یوان = {md.code(get_nerkh_price_safe(['yuan']))} تومان\n"
+        msg += f"🇨🇦 کانادا = {md.code(get_nerkh_price_safe(['cad']))} تومان\n"
+        msg += f"🇦🇺 استرالیا = {md.code(get_nerkh_price_safe(['aud']))} تومان"
+        await message.answer(msg)
+
+    elif text == "🌕 قیمت طلا و سکه":
+        msg = f"🌕 {md.bold('قیمت لحظه‌ای طلا و سکه')}\n⏰ {md.code(time_str)}\n\n"
+        msg += f"🥇 طلا ۱۸ عیار = {md.code(get_nerkh_price_safe(['gold']))} تومان\n"
+        msg += f"🪙 سکه امامی = {md.code(get_nerkh_price_safe(['coin']))} تومان\n"
+        msg += f"🪙 سکه بهار = {md.code(get_nerkh_price_safe(['bahar']))} تومان\n"
+        msg += f"🪙 نیم سکه = {md.code(get_nerkh_price_safe(['half']))} تومان\n"
+        msg += f"🪙 ربع سکه = {md.code(get_nerkh_price_safe(['quarter']))} تومان"
+        await message.answer(msg)
+
+    elif text == "🪙 قیمت ارز دیجیتال":
+        crypto = get_crypto_prices_toman()
+        msg = f"🪙 {md.bold('قیمت لحظه‌ای ارز دیجیتال')}\n⏰ {md.code(time_str)}\n\n"
+        if crypto:
+            for sym, prc in crypto.items():
+                # اضافه کردن ایموجی مناسب برای هر ارز
+                emoji = "🟢" if sym in ["BTC", "ETH"] else "🔹"
+                msg += f"{emoji} {sym} = {md.code(prc)} تومان\n"
+        else:
+            msg += "⚠️ خطا در دریافت اطلاعات ارز دیجیتال."
+        await message.answer(msg)
+
+    elif text == "🤖 چت با هوش مصنوعی":
+        await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
+
+    elif text in ["🧮 ماشین‌حساب طلا", "💸 ماشین‌حساب اقساط", "💱 مبدل هوشمند ارز", "🌤 وضعیت آب‌وهوا", "🚨 آلارم قیمتی", "🎁 دعوت از دوستان"]:
+        await message.answer(f"⏳ بخش {text} در حال توسعه است و به زودی به ربات اضافه می‌شود.")
+
     else:
+        # اگر پیام از منو نبود، به عنوان سوال هوش مصنوعی در نظر گرفته می‌شود
         await message.answer("⏳ در حال پردازش...")
         res = await asyncio.to_thread(get_ai_response, text)
         await message.answer(res)

@@ -71,10 +71,9 @@ async def command_start_handler(message: Message) -> None:
 @dp.message()
 async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
-    # 👇 اینجا هر چیزی شبیه به price یا قیمت رو شناسایی میکنه 👇
+    
     if "price" in text.lower() or "قیمت" in text:
         try:
-            # برای اینکه ربات فریز نشه، درخواست رو توی یه ترد جدا می‌فرستیم
             dollar = await asyncio.to_thread(get_nerkh_price_safe, ['dollar'])
             euro = await asyncio.to_thread(get_nerkh_price_safe, ['euro'])
             gold = await asyncio.to_thread(get_nerkh_price_safe, ['gold'])
@@ -87,7 +86,8 @@ async def handle_message(message: Message) -> None:
             msg += f"🌕 طلا ۱۸ = <code>{gold}</code> تومان\n"
             msg += f"🪙 سکه امامی = <code>{coin}</code> تومان"
             
-            await message.answer(msg, parse_mode=ParseMode.HTML)
+            # 👇 اینجا parse_mode رو حذف کردیم چون توی تنظیمات ربات به صورت پیش‌فرض HTML هست 👇
+            await message.answer(msg)
         except Exception as e:
             await message.answer(f"❌ خطا در دریافت قیمت: {str(e)}")
     else:

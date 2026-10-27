@@ -5,14 +5,15 @@ import threading
 import http.server
 import socketserver
 import pytz
-import urllib.parse
-import arabic_reshaper
 import asyncio
 import json
 from io import BytesIO
 from datetime import datetime, time
-from baleio import Bot, Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from PIL import Image, ImageDraw, ImageFont, features
+from baleio import Bot, Dispatcher, md
+from baleio.client.default import DefaultBotProperties
+from baleio.enums import ParseMode
+from baleio.filters import CommandStart
+from baleio.types import Message
 from supabase import create_client, Client
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -29,8 +30,6 @@ UPSTASH_REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-HAS_RAQM = features.check("raqm")
-user_alerts = {}
 
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
@@ -79,51 +78,31 @@ def get_ai_response(prompt):
         else: return "خطایی رخ داد."
     except Exception: return "خطای اتصال."
 
-def get_main_menu():
-    keyboard = [
-        [KeyboardButton("💱 قیمت ارزها"), KeyboardButton("🌕 قیمت طلا و سکه")],
-        [KeyboardButton("🪙 قیمت ارز دیجیتال"), KeyboardButton("🧮 ماشین‌حساب طلا")],
-        [KeyboardButton("🤖 چت با هوش مصنوعی")]
-    ]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+dp = Dispatcher()
 
-bot = Bot(token=BALE_TOKEN)
+@dp.message(CommandStart())
+async def command_start_handler(message: Message) -> None:
+    welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاین یک نسخه آزمایشی است. برای دریافت قیمت‌ها، دستور /price را بزنید."
+    await message.answer(welcome)
 
-@bot.on_event("ready")
-async def on_ready():
-    print("Bale bot is running...")
-
-@bot.handle("message")
-async def handle_message(message: Message):
+@dp.message()
+async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
-    user_id = message.from_user.id
 
-    if text == "/start":
-        welcome = "سلام! به ربات دیجی نوسان خوش آمدید. ✅\n\nاز منوی زیر انتخاب کنید:"
-        await message.reply(welcome, reply_markup=get_main_menu())
-    elif "قیمت ارزها" in text:
+    if text == "/price" or "قیمت" in text:
         time_str, _ = get_dates_info()
-        msg = f"💱 <b>قیمت لحظه‌ای ارزها</b>\n⏰ <code>{time_str}</code>\n\n💵 دلار = <code>{get_nerkh_price_safe(['dollar'])}</code> تومان\n💶 یورو = <code>{get_nerkh_price_safe(['euro'])}</code> تومان\n💷 پوند = <code>{get_nerkh_price_safe(['pound'])}</code> تومان"
-        await message.reply(msg, parse_mode='HTML')
-    elif "قیمت طلا و سکه" in text:
-        time_str, _ = get_dates_info()
-        msg = f"🌕 <b>قیمت طلا و سکه</b>\n⏰ <code>{time_str}</code>\n\nطلا ۱۸ = <code>{get_nerkh_price_safe(['gold'])}</code> تومان\nسکه امامی = <code>{get_nerkh_price_safe(['coin'])}</code> تومان"
-        await message.reply(msg, parse_mode='HTML')
-    elif "قیمت ارز دیجیتال" in text:
-        time_str, _ = get_dates_info()
-        crypto = get_crypto_prices_toman()
-        msg = f"🪙 <b>قیمت ارز دیجیتال</b>\n⏰ <code>{time_str}</code>\n\n"
-        for sym, prc in crypto.items(): msg += f"🔸 {sym} = <code>{prc}</code> تومان\n"
-        await message.reply(msg, parse_mode='HTML')
-    elif "چت با هوش مصنوعی" in text:
-        await message.reply("سوال خود را بپرسید:")
+        msg = f"💱 <b>قیمت لحظه‌ای</b>\n⏰ <code>{time_str}</code>\n\n💵 دلار = <code>{get_nerkh_price_safe(['dollar'])}</code> تومان\n💶 یورو = <code>{get_nerkh_price_safe(['euro'])}</code> تومان\n🌕 طلا ۱۸ = <code>{get_nerkh_price_safe(['gold'])}</code> تومان"
+        await message.answer(msg, parse_mode=ParseMode.HTML)
     else:
-        # اگر ربات در حالت عادی بود، به عنوان سوال هوش مصنوعی در نظر می‌گیرد
-        await message.reply("⏳ در حال پردازش...")
+        await message.answer("⏳ در حال پردازش...")
         res = await asyncio.to_thread(get_ai_response, text)
-        await message.reply(res)
+        await message.answer(res)
+
+async def main() -> None:
+    bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     threading.Thread(target=run_dummy_server, daemon=True).start()
     print("Starting Bale Bot...")
-    bot.run()
+    asyncio.run(main())

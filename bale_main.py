@@ -12,7 +12,7 @@ from datetime import datetime, time
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.enums import ParseMode
-from baleio.filters import CommandStart
+from baleio.filters import CommandStart, Command
 from baleio.types import Message
 from supabase import create_client, Client
 
@@ -85,14 +85,26 @@ async def command_start_handler(message: Message) -> None:
     welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاین یک نسخه آزمایشی است. برای دریافت قیمت‌ها، دستور /price را بزنید."
     await message.answer(welcome)
 
+# 👇 اضافه کردن هندلر اختصاصی برای دستور price 👇
+@dp.message(Command("price"))
+async def price_handler(message: Message) -> None:
+    time_str, _ = get_dates_info()
+    msg = f"💱 <b>قیمت لحظه‌ای</b>\n⏰ <code>{time_str}</code>\n\n"
+    msg += f"💵 دلار = <code>{get_nerkh_price_safe(['dollar'])}</code> تومان\n"
+    msg += f"💶 یورو = <code>{get_nerkh_price_safe(['euro'])}</code> تومان\n"
+    msg += f"💷 پوند = <code>{get_nerkh_price_safe(['pound'])}</code> تومان\n"
+    msg += f"🌕 طلا ۱۸ = <code>{get_nerkh_price_safe(['gold'])}</code> تومان\n"
+    msg += f"🪙 سکه امامی = <code>{get_nerkh_price_safe(['coin'])}</code> تومان"
+    await message.answer(msg, parse_mode=ParseMode.HTML)
+
+# 👇 اگر کاربر کلمه «قیمت» رو تایپ کرد (بدون اسلش) یا هر چیز دیگه‌ای 👇
 @dp.message()
 async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
 
-    if text == "/price" or "قیمت" in text:
-        time_str, _ = get_dates_info()
-        msg = f"💱 <b>قیمت لحظه‌ای</b>\n⏰ <code>{time_str}</code>\n\n💵 دلار = <code>{get_nerkh_price_safe(['dollar'])}</code> تومان\n💶 یورو = <code>{get_nerkh_price_safe(['euro'])}</code> تومان\n🌕 طلا ۱۸ = <code>{get_nerkh_price_safe(['gold'])}</code> تومان"
-        await message.answer(msg, parse_mode=ParseMode.HTML)
+    if "قیمت" in text:
+        # اجرای همون تابع قیمت
+        await price_handler(message)
     else:
         await message.answer("⏳ در حال پردازش...")
         res = await asyncio.to_thread(get_ai_response, text)

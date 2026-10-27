@@ -52,7 +52,6 @@ def get_nerkh_price_safe(keys_list):
 
 def get_crypto_prices_toman():
     try:
-        # اضافه شدن ارزهای دیجیتال جدید مثل ترون، سولانا و...
         coins = {
             "BTC": "btc", "ETH": "eth", "USDT": "usdt", 
             "BNB": "bnb", "TRX": "trx", "SOL": "sol", 
@@ -79,7 +78,6 @@ def get_ai_response(prompt):
         else: return "خطایی در ارتباط با هوش مصنوعی رخ داد."
     except Exception: return "خطای اتصال به هوش مصنوعی."
 
-# --- ساخت منوی پایین صفحه دقیقاً شبیه عکس ---
 def get_main_menu():
     keyboard = [
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
@@ -108,7 +106,6 @@ async def handle_message(message: Message) -> None:
         await command_start_handler(message)
         
     elif text == "💱 قیمت ارزها":
-        # لیست گسترده‌تر ارزها
         msg = f"💱 {md.bold('قیمت لحظه‌ای ارزها')}\n⏰ {md.code(time_str)}\n\n"
         msg += f"💵 دلار = {md.code(get_nerkh_price_safe(['dollar', 'usd']))} تومان\n"
         msg += f"💶 یورو = {md.code(get_nerkh_price_safe(['euro', 'eur']))} تومان\n"
@@ -123,6 +120,7 @@ async def handle_message(message: Message) -> None:
     elif text == "🌕 قیمت طلا و سکه":
         msg = f"🌕 {md.bold('قیمت لحظه‌ای طلا و سکه')}\n⏰ {md.code(time_str)}\n\n"
         msg += f"🥇 طلا ۱۸ عیار = {md.code(get_nerkh_price_safe(['gold']))} تومان\n"
+        msg += f"🥇 طلا ۲۴ عیار = {md.code(get_nerkh_price_safe(['gold24']))} تومان\n"  # 👈 اضافه شد
         msg += f"🪙 سکه امامی = {md.code(get_nerkh_price_safe(['coin']))} تومان\n"
         msg += f"🪙 سکه بهار = {md.code(get_nerkh_price_safe(['bahar']))} تومان\n"
         msg += f"🪙 نیم سکه = {md.code(get_nerkh_price_safe(['half']))} تومان\n"
@@ -134,9 +132,9 @@ async def handle_message(message: Message) -> None:
         msg = f"🪙 {md.bold('قیمت لحظه‌ای ارز دیجیتال')}\n⏰ {md.code(time_str)}\n\n"
         if crypto:
             for sym, prc in crypto.items():
-                # اضافه کردن ایموجی مناسب برای هر ارز
                 emoji = "🟢" if sym in ["BTC", "ETH"] else "🔹"
-                msg += f"{emoji} {sym} = {md.code(prc)} تومان\n"
+                # 👇 استفاده از کاراکتر نامرئی \u200e برای اصلاح چینش متن 👇
+                msg += f"{emoji} \u200e{sym}\u200e = \u200e{prc}\u200e تومان\n"
         else:
             msg += "⚠️ خطا در دریافت اطلاعات ارز دیجیتال."
         await message.answer(msg)
@@ -148,7 +146,6 @@ async def handle_message(message: Message) -> None:
         await message.answer(f"⏳ بخش {text} در حال توسعه است و به زودی به ربات اضافه می‌شود.")
 
     else:
-        # اگر پیام از منو نبود، به عنوان سوال هوش مصنوعی در نظر گرفته می‌شود
         await message.answer("⏳ در حال پردازش...")
         res = await asyncio.to_thread(get_ai_response, text)
         await message.answer(res)

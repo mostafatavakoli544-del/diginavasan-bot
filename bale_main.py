@@ -28,10 +28,6 @@ BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 👇 حافظه موقت برای دیتای بورس و کالا 👇
-cached_bourse_data = {"index": "در حال دریافت...", "change": "0", "equal_weight": "در حال دریافت...", "equal_weight_change": "0", "state": "..."}
-cached_commodity_data = "در حال دریافت..."
-
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
@@ -88,47 +84,12 @@ def get_main_menu():
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
         [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
         [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="📈 شاخص بورس")],
-        [KeyboardButton(text="🛒 شاخص بازار کالا")], # 👈 دکمه جدید کالا
         [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
         [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
         [KeyboardButton(text="🚨 آلارم قیمتی"), KeyboardButton(text="🤖 چت با هوش مصنوعی")],
         [KeyboardButton(text="🎁 دعوت از دوستان")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-# 👇 تابع پس‌زمینه برای آپدیت بورس و کالا 👇
-async def update_market_data_periodically():
-    global cached_bourse_data, cached_commodity_data
-    while True:
-        # آپدیت بورس
-        try:
-            url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY}&type=1"
-            res = await asyncio.to_thread(requests.get, url, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                cached_bourse_data = {
-                    "index": f"{data.get('index', 0):,.0f}",
-                    "change": f"{data.get('index_change', 0):,.0f}",
-                    "equal_weight": f"{data.get('index_equalWeight', 0):,.0f}",
-                    "equal_weight_change": f"{data.get('index_equalWeight_change', 0):,.0f}",
-                    "state": data.get('state', 'نامشخص')
-                }
-        except Exception as e:
-            print("Error updating Bourse data:", e)
-
-        # آپدیت کالا
-        try:
-            url_cgcc = f"https://Api.Brsapi.ir/Market/CGCC.php?key={BRS_API_KEY}"
-            res_cgcc = await asyncio.to_thread(requests.get, url_cgcc, timeout=10)
-            if res_cgcc.status_code == 200:
-                data_cgcc = res_cgcc.json()
-                cached_commodity_data = f"{data_cgcc.get('index', 0):,.0f}"
-            else:
-                cached_commodity_data = "خطا در دریافت"
-        except Exception as e:
-            print("Error updating Commodity data:", e)
-        
-        await asyncio.sleep(1800) # هر ۳۰ دقیقه
 
 dp = Dispatcher()
 
@@ -178,21 +139,32 @@ async def handle_message(message: Message) -> None:
             msg += "⚠️ خطا در دریافت اطلاعات ارز دیجیتال."
         await message.answer(msg)
 
-    # 👇 بخش شاخص بورس با جزئیات بیشتر 👇
+    # 👇 اینبار دیتا رو در لحظه می‌گیریم تا مطمئن باشیم خطا نمیده 👇
     elif text == "📈 شاخص بورس":
-        msg = f"📈 {md.bold('وضعیت شاخص‌های بورس تهران')}\n⏰ {md.code(time_str)}\n\n"
-        msg += f"🔹 {md.bold('شاخص کل:')} {md.code(cached_bourse_data['index'])} (تغییر: {cached_bourse_data['change']})\n"
-        msg += f"⚖️ {md.bold('شاخص هم‌وزن:')} {md.code(cached_bourse_data['equal_weight'])} (تغییر: {cached_bourse_data['equal_weight_change']})\n"
-        msg += f"🔴 وضعیت بازار: {md.code(cached_bourse_data['state'])}\n\n"
-        msg += "_شاخص کل نشان‌دهنده روند کلی بازار و شاخص هم‌وزن نشان‌دهنده عملکرد اکثر شرکت‌هاست._"
-        await message.answer(msg)
+        await message.answer("⏳ در حال دریافت اطلاعات بورس...")
+        try:
+            url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY}&type=1"
+            # اجرای درخواست در یک ترد جداگانه تا ربات فریز نشه
+            res = await asyncio.to_thread(requests.get, url, timeout=10)
+            
+            if res.status_code == 200:
+                data = res.json()
+                index_val = data.get('index', 0)
+                change_val = data.get('index_change', 0)
+                equal_weight = data.get('index_equalWeight', 0)
+                equal_weight_change = data.get('index_equalWeight_change', 0)
+                state = data.get('state', 'نامشخص')
 
-    # 👇 بخش جدید: شاخص بازار کالا 👇
-    elif text == "🛒 شاخص بازار کالا":
-        msg = f"🛒 {md.bold('شاخص بازار کالا (IME)')}\n⏰ {md.code(time_str)}\n\n"
-        msg += f"🔹 شاخص کل کالا: {md.code(cached_commodity_data)}\n\n"
-        msg += "_این شاخص نشان‌دهنده وضعیت معاملات در بورس کالای ایران است._"
-        await message.answer(msg)
+                msg = f"📈 {md.bold('وضعیت شاخص‌های بورس تهران')}\n⏰ {md.code(time_str)}\n\n"
+                msg += f"🔹 {md.bold('شاخص کل:')} {md.code(f'{index_val:,.0f}')} (تغییر: {change_val:,.0f})\n"
+                msg += f"⚖️ {md.bold('شاخص هم‌وزن:')} {md.code(f'{equal_weight:,.0f}')} (تغییر: {equal_weight_change:,.0f})\n"
+                msg += f"🔴 وضعیت بازار: {md.code(state)}\n\n"
+                msg += "_شاخص کل نشان‌دهنده روند کلی بازار و شاخص هم‌وزن نشان‌دهنده عملکرد اکثر شرکت‌هاست._"
+                await message.answer(msg)
+            else:
+                await message.answer(f"❌ خطا در دریافت اطلاعات. کد خطا: {res.status_code}")
+        except Exception as e:
+            await message.answer(f"❌ خطای شبکه: {str(e)}")
 
     elif text == "🤖 چت با هوش مصنوعی":
         await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
@@ -207,7 +179,6 @@ async def handle_message(message: Message) -> None:
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    asyncio.create_task(update_market_data_periodically())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

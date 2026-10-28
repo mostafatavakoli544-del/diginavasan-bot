@@ -120,7 +120,7 @@ async def handle_message(message: Message) -> None:
     elif text == "🌕 قیمت طلا و سکه":
         msg = f"🌕 {md.bold('قیمت لحظه‌ای طلا و سکه')}\n⏰ {md.code(time_str)}\n\n"
         msg += f"🥇 طلا ۱۸ عیار = {md.code(get_nerkh_price_safe(['gold']))} تومان\n"
-        msg += f"🥇 طلا ۲۴ عیار = {md.code(get_nerkh_price_safe(['gold24']))} تومان\n"  # 👈 اضافه شد
+        msg += f"🥇 طلا ۲۴ عیار = {md.code(get_nerkh_price_safe(['gold24']))} تومان\n"
         msg += f"🪙 سکه امامی = {md.code(get_nerkh_price_safe(['coin']))} تومان\n"
         msg += f"🪙 سکه بهار = {md.code(get_nerkh_price_safe(['bahar']))} تومان\n"
         msg += f"🪙 نیم سکه = {md.code(get_nerkh_price_safe(['half']))} تومان\n"
@@ -133,8 +133,9 @@ async def handle_message(message: Message) -> None:
         if crypto:
             for sym, prc in crypto.items():
                 emoji = "🟢" if sym in ["BTC", "ETH"] else "🔹"
-                # 👇 استفاده از کاراکتر نامرئی \u200e برای اصلاح چینش متن 👇
-                msg += f"{emoji} \u200e{sym}\u200e = \u200e{prc}\u200e تومان\n"
+                # 👇 ترفند جدید برای حل مشکل راست‌چین/چپ‌چین 👇
+                # کلمه تومان را اول می‌گذاریم تا کل خط راست‌چین شود
+                msg += f"تومان {md.code(prc)} = {md.code(sym)} {emoji}\n"
         else:
             msg += "⚠️ خطا در دریافت اطلاعات ارز دیجیتال."
         await message.answer(msg)

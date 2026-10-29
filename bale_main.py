@@ -163,91 +163,86 @@ async def handle_message(message: Message) -> None:
             await message.answer(f"❌ خطای شبکه: {str(e)}")
 
     elif text == "📦 بازار کالا":
-        await message.answer("⏳ در حال دریافت آمار معاملات کالا...")
+        await message.answer("⏳ در حال دریافت آخرین آمار معاملات کالا...")
         try:
-            today_shamsi = jdatetime.date.today().strftime("%Y-%m-%d")
-            url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={today_shamsi}&date_end={today_shamsi}"
+            today = jdatetime.date.today()
+            target_commodities = {
+                "مس کاتد": "پایه سیم و کابل",
+                "آهن اسفنجی": "جایگزین آهن‌قراضه در کوره",
+                "گندله سنگ آهن": "مواد اولیه کوره بلند",
+                "وکیوم باتوم": "پایه قیر و آسفالت",
+                "شمش آلومینیوم": "فلز سبک صنایع",
+                "کنسانتره سنگ آهن": "پودر غلیظ‌شده سنگ آهن"
+            }
+            
+            found_items = {}
+            date_found_str = ""
             headers = {'User-Agent': 'Mozilla/5.0'}
-            
-            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
-            
-            if res.status_code == 200:
-                data = res.json()
-                if not data:
-                    await message.answer("⚠️ امروز معامله‌ای در بورس کالا ثبت نشده است (یا بازار تعطیل است).")
-                    return
 
-                target_commodities = {
-                    "مس کاتد": "پایه سیم و کابل",
-                    "آهن اسفنجی": "جایگزین آهن‌قراضه در کوره",
-                    "گندله سنگ آهن": "مواد اولیه کوره بلند",
-                    "وکیوم باتوم": "پایه قیر و آسفالت",
-                    "شمش آلومینیوم": "فلز سبک صنایع",
-                    "کنسانتره سنگ آهن": "پودر غلیظ‌شده سنگ آهن"
-                }
+            # 👇 حلقه عقب‌گرد هوشمند (تا ۷ روز قبل) 👇
+            for i in range(7):
+                check_date = today - jdatetime.timedelta(days=i)
+                date_str = check_date.strftime("%Y-%m-%d")
+                url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={date_str}&date_end={date_str}"
                 
-                found_items = {}
+                res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
                 
-                for item in data:
-                    name = item.get('l30', '')
-                    for key in target_commodities.keys():
-                        if key in name:
-                            raw_price = item.get('pc')
-                            if raw_price is None:
-                                continue
-                            
-                            price_toman = raw_price / 10
-                            volume = item.get('volume_contract') or 0
-                            
-                            if key not in found_items or item.get('date_trade') > found_items[key]['date']:
-                                found_items[key] = {
-                                    "price": price_toman,
-                                    "volume": volume,
-                                    "date": item.get('date_trade')
-                                }
+                if res.status_code == 200:
+                    data = res.json()
+                    if data:
+                        for item in data:
+                            name = item.get('l30', '')
+                            for key in target_commodities.keys():
+                                if key in name:
+                                    raw_price = item.get('pc')
+                                    if raw_price is None:
+                                        continue
+                                    
+                                    price_toman = raw_price / 10
+                                    volume = item.get('volume_contract') or 0
+                                    
+                                    if key not in found_items or item.get('date_trade') > found_items[key]['date']:
+                                        found_items[key] = {
+                                            "price": price_toman,
+                                            "volume": volume,
+                                            "date": item.get('date_trade')
+                                        }
+                        if found_items:
+                            date_found_str = check_date.strftime("%Y/%m/%d")
+                            break # به محض پیدا کردن دیتا، حلقه رو متوقف کن
+                elif res.status_code == 400:
+                    continue # اگه ۴۰۰ داد (تعطیل بود)، برو روز قبل رو چک کن
 
-                if not found_items:
-                    await message.answer("⚠️ امروز برای کالاهای هدف ما معامله‌ای ثبت نشده است.")
-                    return
+            if not found_items:
+                await message.answer("⚠️ در ۷ روز گذشته معامله‌ای برای کالاهای هدف ثبت نشده است.")
+                return
 
-                msg = f"📦 {md.bold('آخرین معاملات بورس کالا')}\n⏰ {md.code(time_str)}\n\n"
-                
-                msg += f"🥇 {md.bold('فلزات اساسی:')}\n"
-                if "مس کاتد" in found_items:
-                    i = found_items["مس کاتد"]
-                    price_str = f"{i['price']:,.0f}"
-                    vol_str = f"{i['volume']:,}"
-                    msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-                if "شمش آلومینیوم" in found_items:
-                    i = found_items["شمش آلومینیوم"]
-                    price_str = f"{i['price']:,.0f}"
-                    vol_str = f"{i['volume']:,}"
-                    msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-                
-                msg += f"\n🏗️ {md.bold('فولاد و مواد معدنی:')}\n"
-                for key in ["آهن اسفنجی", "گندله سنگ آهن", "کنسانتره سنگ آهن"]:
-                    if key in found_items:
-                        i = found_items[key]
-                        price_str = f"{i['price']:,.0f}"
-                        vol_str = f"{i['volume']:,}"
-                        msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-                
-                msg += f"\n🛢️ {md.bold('انرژی و فرآورده‌ها:')}\n"
-                if "وکیوم باتوم" in found_items:
-                    i = found_items["وکیوم باتوم"]
-                    price_str = f"{i['price']:,.0f}"
-                    vol_str = f"{i['volume']:,}"
-                    msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-
-                msg += "\n_(قیمت‌ها بر اساس آخرین معامله ثبت‌شده در این تاریخ است)_"
-                await message.answer(msg)
+            msg = f"📦 {md.bold('آخرین معاملات بورس کالا')}\n"
+            msg += f"🗓 تاریخ معاملات: {md.code(date_found_str)}\n"
+            msg += f"⏰ {md.code(time_str)}\n\n"
             
-            elif res.status_code == 400:
-                # 👇 اینجا باگ ۴۰۰ رو مدیریت کردیم 👇
-                await message.answer("⚠️ امروز معامله‌ای در بورس کالا ثبت نشده است (احتمالاً بازار تعطیل است - مثل پنجشنبه و جمعه).")
+            msg += f"🥇 {md.bold('فلزات اساسی:')}\n"
+            if "مس کاتد" in found_items:
+                i_data = found_items["مس کاتد"]
+                msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+            if "شمش آلومینیوم" in found_items:
+                i_data = found_items["شمش آلومینیوم"]
+                msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
             
-            else:
-                await message.answer(f"❌ خطای سرور (کد {res.status_code}).\nلطفاً بعداً تلاش کنید.")
+            msg += f"\n🏗️ {md.bold('فولاد و مواد معدنی:')}\n"
+            for key in ["آهن اسفنجی", "گندله سنگ آهن", "کنسانتره سنگ آهن"]:
+                if key in found_items:
+                    i_data = found_items[key]
+                    msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+            
+            msg += f"\n🛢️ {md.bold('انرژی و فرآورده‌ها:')}\n"
+            if "وکیوم باتوم" in found_items:
+                i_data = found_items["وکیوم باتوم"]
+                msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+
+            msg += "\n_(قیمت‌ها بر اساس آخرین معاملات ثبت‌شده در بازار است)_"
+            await message.answer(msg)
+            
         except Exception as e:
             await message.answer(f"❌ خطای شبکه در بازار کالا: {str(e)}")
 

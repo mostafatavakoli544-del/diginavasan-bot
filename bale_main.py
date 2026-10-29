@@ -169,6 +169,7 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آمار معاملات کالا...")
         try:
+            # استفاده از تاریخ 18 خرداد که دیتای تستی داره
             test_date = "1404-03-18" 
             url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={test_date}&date_end={test_date}"
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -196,8 +197,13 @@ async def handle_message(message: Message) -> None:
                     name = item.get('l30', '')
                     for key in target_commodities.keys():
                         if key in name:
-                            price_toman = item.get('pc', 0) / 10
-                            volume = item.get('volume_contract', 0)
+                            # 👇 اینجا باگ NoneType رو برطرف کردیم (اگر None بود صفر میذاره) 👇
+                            raw_price = item.get('pc')
+                            if raw_price is None:
+                                continue # اگر قیمت پایانی ثبت نشده بود، کالا رو رد کن
+                            
+                            price_toman = raw_price / 10
+                            volume = item.get('volume_contract') or 0
                             
                             if key not in found_items or item.get('date_trade') > found_items[key]['date']:
                                 found_items[key] = {
@@ -230,7 +236,7 @@ async def handle_message(message: Message) -> None:
                 msg += "\n_(قیمت‌ها بر اساس آخرین معامله ثبت‌شده در این تاریخ است)_"
                 await message.answer(msg)
             else:
-                await message.answer(f"❌ خطای سرور (کد {res.status_code}).\nمتن خطا: {res.text[:200]}")
+                await message.answer(f"❌ خطای سرور (کد {res.status_code}).\nلطفاً بعداً تلاش کنید.")
         except Exception as e:
             await message.answer(f"❌ خطای شبکه در بازار کالا: {str(e)}")
 
@@ -250,6 +256,7 @@ async def main() -> None:
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    threading.run_dummy_server = run_dummy_server # اصلاح نام‌گذاری برای وضوح
     threading.Thread(target=run_dummy_server, daemon=True).start()
     print("Starting Bale Bot...")
     asyncio.run(main())

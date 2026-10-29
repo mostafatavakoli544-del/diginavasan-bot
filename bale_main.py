@@ -171,7 +171,6 @@ async def handle_message(message: Message) -> None:
             found_data = None
             date_found_str = ""
 
-            # 👇 حلقه عقب‌گرد هوشمند: حداکثر ۷ روز به عقب می‌ره تا بازار باز پیدا کنه 👇
             for i in range(7):
                 check_date = today - jdatetime.timedelta(days=i)
                 date_str = check_date.strftime("%Y-%m-%d")
@@ -184,23 +183,38 @@ async def handle_message(message: Message) -> None:
                     if data and len(data) > 0:
                         found_data = data
                         date_found_str = check_date.strftime("%Y/%m/%d")
-                        break # دیتا پیدا شد، از حلقه خارج شو
+                        break
                 
-                # کمی صبر می‌کنیم تا به API فشار نیاد (ضد بن شدن)
                 await asyncio.sleep(0.5)
 
             if not found_data:
                 await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
                 return
 
-            # مرتب‌سازی بر اساس ارزش معاملات (tval) و انتخاب ۱۰ کالای برتر
+            # فیلتر کردن کالاهای بدون قیمت و مرتب‌سازی بر اساس ارزش معامله
             valid_items = [item for item in found_data if item.get('pc') is not None and item.get('l30')]
             valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
+            
+            # برداشتن ۱۰ کالای برتر (بدون ادغام)
             top_items = valid_items[:10]
 
             if not top_items:
                 await message.answer("⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد.")
                 return
+
+            # 📚 دیکشنری توضیحات برای افزایش اطلاعات عمومی کاربر 📚
+            descriptions = {
+                "تختال": "اسلب یا تختال، محصول نیمه‌ساخته فولادی است که مواد اولیه تولید ورق‌های فولادی محسوب می‌شود.",
+                "ورق گرم": "ورقی که در دمای بالا نورد می‌شود. در صنایع ساختمانی و خودروسازی کاربرد دارد.",
+                "ورق سرد": "ورقی که پس از نورد گرم، در دمای اتاق نورد می‌شود. سطح صاف‌تری دارد و در لوازم خانگی استفاده می‌شود.",
+                "میلگرد": "فولاد آجدار که در ساخت‌وساز و بتن‌ریزی برای استحکام بخشیدن به سازه استفاده می‌شود.",
+                "اسید سولفوریک": "یک اسید معدنی بسیار قوی که در صنایع شیمیایی، کودسازی و تصفیه فلزات کاربرد دارد.",
+                "سود کاستیک": "یا سود سوزآور، ماده شیمیایی قوی که در تولید صابون، کاغذ و نساجی استفاده می‌شود.",
+                "پلی اتیلن ترفتالات": "معروف به PET، پلیمری پرکاربرد در تولید الیاف نساجی و بطری‌های پلاستیکی (مثل بطری آب).",
+                "ورق قلع اندود": "ورق فولادی که با لایه نازکی از قلع پوشیده شده و در ساخت قوطی کنسرو و نوشابه استفاده می‌شود.",
+                "وکیوم باتوم": "ماده اولیه و پایه تولید قیر و آسفالت است که از پالایش نفت به دست می‌آید.",
+                "شمش بلوم": "محصول نیمه‌ساخته فولادی با مقطع مربعی که برای تولید میلگرد و تیرآهن استفاده می‌شود."
+            }
 
             msg = f"📦 {md.bold('مهم‌ترین معاملات بورس کالا')}\n"
             msg += f"🗓 آخرین تاریخ معامله: {md.code(date_found_str)}\n"
@@ -208,16 +222,26 @@ async def handle_message(message: Message) -> None:
             
             for item in top_items:
                 name = item.get('l30', 'نامشخص')
-                # محاسبه قیمت به تومان (تقسیم بر ۱۰)
+                producer = item.get('producer', 'نامشخص')
                 price_toman = item.get('pc', 0) / 10
-                # استفاده از متغیرهای جداگانه برای جلوگیری از خطای سینتکس در رشته‌های تو در تو
+                volume = item.get('volume_contract') or 0
+                
                 price_str = f"{price_toman:,.0f}"
-                volume_str = f"{item.get('volume_contract', 0):,}"
+                volume_str = f"{volume:,}"
                 
                 msg += f"🔹 {md.bold(name)}\n"
-                msg += f"   قیمت: {md.code(price_str)} تومان | حجم: {md.code(volume_str)} تن\n"
+                msg += f"🏭 کارخانه: {producer}\n"
+                msg += f"💰 قیمت: {md.code(price_str)} تومان | 📦 حجم: {md.code(volume_str)} تن\n"
+                
+                # جستجوی کلمه کلیدی در اسم کالا برای پیدا کردن توضیح مناسب
+                for key, desc in descriptions.items():
+                    if key in name:
+                        msg += f"💡 {desc}\n"
+                        break # وقتی توضیح پیدا شد، از این حلقه خارج شو
+                
+                msg += "\n" # یک خط فاصله بین کالاها
 
-            msg += "\n_(بر اساس ۱۰ کالای با بالاترین ارزش معامله در بازار)_"
+            msg += "_(بر اساس ۱۰ کالای با بالاترین ارزش معامله)_"
             await message.answer(msg)
             
         except requests.exceptions.Timeout:

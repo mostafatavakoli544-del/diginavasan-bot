@@ -165,7 +165,6 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آمار معاملات کالا...")
         try:
-            # 👇 اینجا تاریخ رو داینامیک کردیم (تاریخ شمسی امروز) 👇
             today_shamsi = jdatetime.date.today().strftime("%Y-%m-%d")
             url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={today_shamsi}&date_end={today_shamsi}"
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -216,24 +215,37 @@ async def handle_message(message: Message) -> None:
                 msg += f"🥇 {md.bold('فلزات اساسی:')}\n"
                 if "مس کاتد" in found_items:
                     i = found_items["مس کاتد"]
-                    msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                    price_str = f"{i['price']:,.0f}"
+                    vol_str = f"{i['volume']:,}"
+                    msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
                 if "شمش آلومینیوم" in found_items:
                     i = found_items["شمش آلومینیوم"]
-                    msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                    price_str = f"{i['price']:,.0f}"
+                    vol_str = f"{i['volume']:,}"
+                    msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
                 
                 msg += f"\n🏗️ {md.bold('فولاد و مواد معدنی:')}\n"
                 for key in ["آهن اسفنجی", "گندله سنگ آهن", "کنسانتره سنگ آهن"]:
                     if key in found_items:
                         i = found_items[key]
-                        msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                        price_str = f"{i['price']:,.0f}"
+                        vol_str = f"{i['volume']:,}"
+                        msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
                 
                 msg += f"\n🛢️ {md.bold('انرژی و فرآورده‌ها:')}\n"
                 if "وکیوم باتوم" in found_items:
                     i = found_items["وکیوم باتوم"]
-                    msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                    price_str = f"{i['price']:,.0f}"
+                    vol_str = f"{i['volume']:,}"
+                    msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
 
                 msg += "\n_(قیمت‌ها بر اساس آخرین معامله ثبت‌شده در این تاریخ است)_"
                 await message.answer(msg)
+            
+            elif res.status_code == 400:
+                # 👇 اینجا باگ ۴۰۰ رو مدیریت کردیم 👇
+                await message.answer("⚠️ امروز معامله‌ای در بورس کالا ثبت نشده است (احتمالاً بازار تعطیل است - مثل پنجشنبه و جمعه).")
+            
             else:
                 await message.answer(f"❌ خطای سرور (کد {res.status_code}).\nلطفاً بعداً تلاش کنید.")
         except Exception as e:

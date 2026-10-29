@@ -18,9 +18,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 BALE_TOKEN = os.environ.get("BALE_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
-CHANNEL_ID = "@diginavasan"
-ADMIN_ID = 718840144
-
+# فعلاً به ادمین می‌فرستیم چون کانال ساخته نشده. بعداً این رو به کانال تغییر می‌دیم.
+TARGET_CHAT_ID = int(os.environ.get("ADMIN_ID", 718840144)) 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
@@ -76,11 +75,11 @@ def get_ai_response(prompt):
     except Exception: return "خطای اتصال به هوش مصنوعی."
 
 def get_main_menu():
+    # 👇 دکمه بازار کالا حذف شده است 👇
     keyboard = [
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
         [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
         [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="📈 شاخص بورس")],
-        [KeyboardButton(text="📦 بازار کالا")], 
         [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
         [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
         [KeyboardButton(text="🚨 آلارم قیمتی"), KeyboardButton(text="🤖 چت با هوش مصنوعی")],
@@ -95,6 +94,117 @@ async def command_start_handler(message: Message) -> None:
     welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:"
     await message.answer(welcome, reply_markup=get_main_menu())
 
+# 👇 این تابع، وظیفه‌ی گرفتن دیتای کالا و ساختن پیام رو بر عهده داره 👇
+async def fetch_and_format_commodities():
+    today = jdatetime.date.today()
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    found_data = None
+    date_found_str = ""
+    payment_required = False
+
+    for i in range(7):
+        check_date = today - jdatetime.timedelta(days=i)
+        date_str = check_date.strftime("%Y-%m-%d")
+        url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={date_str}&date_end={date_str}"
+        
+        res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=15)
+        
+        if res.status_code == 200:
+            try:
+                data = res.json()
+                if isinstance(data, list) and len(data) > 0:
+                    found_data = data
+                    date_found_str = check_date.strftime("%Y/%m/%d")
+                    break
+            except:
+                pass
+        elif res.status_code == 402:
+            payment_required = True
+            break
+        
+        await asyncio.sleep(1)
+
+    if payment_required:
+        return "⚠️ **اطلاعات موقتاً در دسترس نیست.**\nسهمیه رایگان سرور بورس کالا به پایان رسیده است. (در حال ارتقاء به نسخه پولی هستیم تا این بخش دوباره فعال شود)."
+
+    if not found_data:
+        return "⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است."
+
+    valid_items = [item for item in found_data if item.get('pc') is not None and item.get('l30')]
+    valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
+    top_items = valid_items[:10]
+
+    if not top_items:
+        return "⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد."
+
+    descriptions = {
+        "تختال": "اسلب یا تختال، محصول نیمه‌ساخته فولادی است که مواد اولیه تولید ورق‌های فولادی محسوب می‌شود.",
+        "ورق گرم": "ورقی که در دمای بالا نورد می‌شود. در صنایع ساختمانی و خودروسازی کاربرد دارد.",
+        "ورق سرد": "ورقی که پس از نورد گرم، در دمای اتاق نورد می‌شود. سطح صاف‌تری دارد و در لوازم خانگی استفاده می‌شود.",
+        "میلگرد": "فولاد آجدار که در ساخت‌وساز و بتن‌ریزی برای استحکام بخشیدن به سازه استفاده می‌شود.",
+        "اسید سولفوریک": "یک اسید معدنی بسیار قوی که در صنایع شیمیایی، کودسازی و تصفیه فلزات کاربرد دارد.",
+        "سود کاستیک": "یا سود سوزآور، ماده شیمیایی قوی که در تولید صابون، کاغذ و نساجی استفاده می‌شود.",
+        "پلی اتیلن ترفتالات": "معروف به PET، پلیمری پرکاربرد در تولید الیاف نساجی و بطری‌های پلاستیکی (مثل بطری آب).",
+        "ورق قلع اندود": "ورق فولادی که با لایه نازکی از قلع پوشیده شده و در ساخت قوطی کنسرو و نوشابه استفاده می‌شود.",
+        "وکیوم باتوم": "ماده اولیه و پایه تولید قیر و آسفالت است که از پالایش نفت به دست می‌آید.",
+        "شمش بلوم": "محصول نیمه‌ساخته فولادی با مقطع مربعی که برای تولید میلگرد و تیرآهن استفاده می‌شود."
+    }
+
+    msg = f"📦 {md.bold('مهم‌ترین معاملات بورس کالا')}\n"
+    msg += f"🗓 آخرین تاریخ معامله: {md.code(date_found_str)}\n"
+    msg += f"⏰ {md.code(get_dates_info()[0])}\n\n"
+    
+    for item in top_items:
+        name = item.get('l30', 'نامشخص')
+        producer = item.get('producer', 'نامشخص')
+        price_toman = item.get('pc', 0) / 10
+        volume = item.get('volume_contract') or 0
+        
+        price_str = f"{price_toman:,.0f}"
+        volume_str = f"{volume:,}"
+        
+        msg += f"🔹 {md.bold(name)}\n"
+        msg += f"🏭 کارخانه: {producer}\n"
+        msg += f"💰 قیمت: {md.code(price_str)} تومان | 📦 حجم: {md.code(volume_str)} تن\n"
+        
+        for key, desc in descriptions.items():
+            if key in name:
+                msg += f"💡 {desc}\n"
+                break
+        
+        msg += "\n"
+
+    msg += "_(بر اساس ۱۰ کالای با بالاترین ارزش معامله)_"
+    return msg
+
+# 👇 این تابع، زمان‌بند ارسال روزانه به کانال (فعلا ادمین) است 👇
+async def daily_commodity_scheduler(bot: Bot):
+    while True:
+        try:
+            now = datetime.now(pytz.timezone('Asia/Tehran'))
+            # تنظیم ساعت روی 12:35 ظهر
+            target_time = now.replace(hour=12, minute=35, second=0, microsecond=0)
+            if now >= target_time:
+                target_time += timedelta(days=1)
+            
+            wait_seconds = (target_time - now).total_seconds()
+            logging.info(f"Next commodity broadcast scheduled for {target_time}")
+            await asyncio.sleep(wait_seconds)
+            
+            # زمان ارسال فرا رسیده
+            logging.info("Fetching commodity data for broadcast...")
+            msg = await fetch_and_format_commodities()
+            
+            # ارسال به TARGET_CHAT_ID (که فعلا ادمین است)
+            await bot.send_message(chat_id=TARGET_CHAT_ID, text=msg)
+            logging.info("Commodity broadcast sent successfully.")
+            
+            await asyncio.sleep(60) # یک دقیقه صبر کن تا از حلقه خارج نشه
+        except Exception as e:
+            logging.error(f"Error in daily broadcast: {e}")
+            await asyncio.sleep(60)
+
+
 @dp.message()
 async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
@@ -103,6 +213,11 @@ async def handle_message(message: Message) -> None:
     if text == "🚀 استارت / منوی اصلی" or text == "/start":
         await command_start_handler(message)
         
+    elif text == "/test_kala": # 👈 کلید مخفی تست
+        await message.answer("⏳ در حال دریافت اطلاعات تست کالا...")
+        msg = await fetch_and_format_commodities()
+        await message.answer(msg)
+
     elif text == "💱 قیمت ارزها":
         msg = f"💱 {md.bold('قیمت لحظه‌ای ارزها')}\n⏰ {md.code(time_str)}\n\n"
         msg += f"💵 دلار = {md.code(get_nerkh_price_safe(['dollar', 'usd']))} تومان\n"
@@ -150,121 +265,45 @@ async def handle_message(message: Message) -> None:
                 equal_weight = data.get('index_equalWeight', 0)
                 equal_weight_change = data.get('index_equalWeight_change', 0)
                 state = data.get('state', 'نامشخص')
+                
+                # 👇 استخراج دیتاهای جدید 👇
+                mv = data.get('mv', 0)
+                tno = data.get('tno', 0)
+                tval = data.get('tval', 0)
+                tvol = data.get('tvol', 0)
+
+                # فرمت کردن اعداد بزرگ
+                # mv (ارزش بازار) بر حسب ریال است. تقسیم بر 10^13 میکنیم تا بشه "هزار میلیارد تومان"
+                mv_str = f"{mv / 10000000000000:,.0f}"
+                # tval (ارزش معاملات) بر حسب ریال است. تقسیم بر 10^10 میکنیم تا بشه "میلیارد تومان"
+                tval_str = f"{tval / 10000000000:,.0f}"
+                tno_str = f"{tno:,}"
+                tvol_str = f"{tvol:,}"
 
                 msg = f"📈 {md.bold('وضعیت شاخص‌های بورس تهران')}\n⏰ {md.code(time_str)}\n\n"
                 msg += f"🔹 {md.bold('شاخص کل:')} {md.code(f'{index_val:,.0f}')} (تغییر: {change_val:,.0f})\n"
                 msg += f"⚖️ {md.bold('شاخص هم‌وزن:')} {md.code(f'{equal_weight:,.0f}')} (تغییر: {equal_weight_change:,.0f})\n"
                 msg += f"🔴 وضعیت بازار: {md.code(state)}\n\n"
-                msg += "_شاخص کل نشان‌دهنده روند کلی بازار و شاخص هم‌وزن نشان‌دهنده عملکرد اکثر شرکت‌هاست._"
+                msg += f"📊 {md.bold('آمار کلی بازار:')}\n"
+                msg += f"💰 ارزش کل بازار: {md.code(mv_str)} هزار میلیارد تومان\n"
+                msg += f"💵 ارزش معاملات: {md.code(tval_str)} میلیارد تومان\n"
+                msg += f"🧾 تعداد معاملات: {md.code(tno_str)} معامله\n"
+                msg += f"📦 حجم معاملات: {md.code(tvol_str)} سهم\n\n"
+                msg += "_توجه: در پلن رایگان، آمار مربوط به آخرین روز معاملاتی است._"
+                
                 await message.answer(msg)
             else:
                 await message.answer(f"❌ خطا در دریافت اطلاعات. کد خطا: {res.status_code}")
         except Exception as e:
             await message.answer(f"❌ خطای شبکه: {str(e)}")
 
-    elif text == "📦 بازار کالا":
-        await message.answer("⏳ در حال دریافت آخرین آمار معاملات کالا...")
-        try:
-            now_tehran = datetime.now(pytz.timezone('Asia/Tehran'))
-            today = jdatetime.date.fromgregorian(date=now_tehran.date())
-            
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            found_data = None
-            date_found_str = ""
-            
-            # 👇 این لیست، پیام‌های خطای سرور رو ذخیره می‌کنه تا بهت نشون بدیم 👇
-            debug_logs = []
+    elif text == "🧮 ماشین‌حساب طلا":
+        await message.answer("⏳ بخش ماشین‌حساب طلا در حال آماده‌سازی است...")
+        
+    elif text == "💸 ماشین‌حساب اقساط":
+        await message.answer("⏳ بخش ماشین‌حساب اقساط در حال آماده‌سازی است...")
 
-            for i in range(7):
-                check_date = today - jdatetime.timedelta(days=i)
-                date_str = check_date.strftime("%Y-%m-%d")
-                url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={date_str}&date_end={date_str}"
-                
-                res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=15)
-                
-                # ثبت وضعیت هر روز برای بررسی
-                debug_logs.append(f"روز {date_str}: کد {res.status_code} | پاسخ: {res.text[:30]}...")
-                
-                if res.status_code == 200:
-                    try:
-                        data = res.json()
-                        if isinstance(data, list) and len(data) > 0:
-                            found_data = data
-                            date_found_str = check_date.strftime("%Y/%m/%d")
-                            break
-                    except:
-                        pass
-                
-                await asyncio.sleep(1)
-
-            if not found_data:
-                await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
-                
-                # 👇 این بخش رو اضافه کردم که خطای واقعی سرور رو بهت نشون بده 👇
-                debug_msg = "🛠 **گزارش عیب‌یابی سرور برس‌اپی:**\n\n"
-                debug_msg += "\n".join(debug_logs)
-                debug_msg += "\n\n(این پیام فقط برای تست است و بعداً حذف می‌شود)"
-                await message.answer(debug_msg)
-                return
-
-            # فیلتر و مرتب‌سازی
-            valid_items = [item for item in found_data if item.get('pc') is not None and item.get('l30')]
-            valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
-            top_items = valid_items[:10]
-
-            if not top_items:
-                await message.answer("⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد.")
-                return
-
-            descriptions = {
-                "تختال": "اسلب یا تختال، محصول نیمه‌ساخته فولادی است که مواد اولیه تولید ورق‌های فولادی محسوب می‌شود.",
-                "ورق گرم": "ورقی که در دمای بالا نورد می‌شود. در صنایع ساختمانی و خودروسازی کاربرد دارد.",
-                "ورق سرد": "ورقی که پس از نورد گرم، در دمای اتاق نورد می‌شود. سطح صاف‌تری دارد و در لوازم خانگی استفاده می‌شود.",
-                "میلگرد": "فولاد آجدار که در ساخت‌وساز و بتن‌ریزی برای استحکام بخشیدن به سازه استفاده می‌شود.",
-                "اسید سولفوریک": "یک اسید معدنی بسیار قوی که در صنایع شیمیایی، کودسازی و تصفیه فلزات کاربرد دارد.",
-                "سود کاستیک": "یا سود سوزآور، ماده شیمیایی قوی که در تولید صابون، کاغذ و نساجی استفاده می‌شود.",
-                "پلی اتیلن ترفتالات": "معروف به PET، پلیمری پرکاربرد در تولید الیاف نساجی و بطری‌های پلاستیکی (مثل بطری آب).",
-                "ورق قلع اندود": "ورق فولادی که با لایه نازکی از قلع پوشیده شده و در ساخت قوطی کنسرو و نوشابه استفاده می‌شود.",
-                "وکیوم باتوم": "ماده اولیه و پایه تولید قیر و آسفالت است که از پالایش نفت به دست می‌آید.",
-                "شمش بلوم": "محصول نیمه‌ساخته فولادی با مقطع مربعی که برای تولید میلگرد و تیرآهن استفاده می‌شود."
-            }
-
-            msg = f"📦 {md.bold('مهم‌ترین معاملات بورس کالا')}\n"
-            msg += f"🗓 آخرین تاریخ معامله: {md.code(date_found_str)}\n"
-            msg += f"⏰ {md.code(time_str)}\n\n"
-            
-            for item in top_items:
-                name = item.get('l30', 'نامشخص')
-                producer = item.get('producer', 'نامشخص')
-                price_toman = item.get('pc', 0) / 10
-                volume = item.get('volume_contract') or 0
-                
-                price_str = f"{price_toman:,.0f}"
-                volume_str = f"{volume:,}"
-                
-                msg += f"🔹 {md.bold(name)}\n"
-                msg += f"🏭 کارخانه: {producer}\n"
-                msg += f"💰 قیمت: {md.code(price_str)} تومان | 📦 حجم: {md.code(volume_str)} تن\n"
-                
-                for key, desc in descriptions.items():
-                    if key in name:
-                        msg += f"💡 {desc}\n"
-                        break
-                
-                msg += "\n"
-
-            msg += "_(بر اساس ۱۰ کالای با بالاترین ارزش معامله)_"
-            await message.answer(msg)
-            
-        except requests.exceptions.Timeout:
-            await message.answer("❌ سرور بورس کالا پاسخ نداد (تایم‌اوت).")
-        except Exception as e:
-            await message.answer(f"❌ خطای شبکه در بازار کالا: {str(e)}")
-
-    elif text == "🤖 چت با هوش مصنوعی":
-        await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
-
-    elif text in ["🧮 ماشین‌حساب طلا", "💸 ماشین‌حساب اقساط", "💱 مبدل هوشمند ارز", "🌤 وضعیت آب‌وهوا", "🚨 آلارم قیمتی", "🎁 دعوت از دوستان"]:
+    elif text in ["💱 مبدل هوشمند ارز", "🌤 وضعیت آب‌وهوا", "🚨 آلارم قیمتی", "🎁 دعوت از دوستان"]:
         await message.answer(f"⏳ بخش {text} در حال توسعه است و به زودی به ربات اضافه می‌شود.")
 
     else:
@@ -274,6 +313,10 @@ async def handle_message(message: Message) -> None:
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    
+    # روشن کردن زمان‌بند در پس‌زمینه
+    asyncio.create_task(daily_commodity_scheduler(bot))
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

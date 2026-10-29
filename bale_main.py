@@ -165,14 +165,15 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آخرین آمار معاملات کالا...")
         try:
-            # محاسبه تاریخ دقیق به وقت تهران برای جلوگیری از خطای تایم‌زون رندر
             now_tehran = datetime.now(pytz.timezone('Asia/Tehran'))
             today = jdatetime.date.fromgregorian(date=now_tehran.date())
             
             headers = {'User-Agent': 'Mozilla/5.0'}
             found_data = None
             date_found_str = ""
-            api_error_msg = ""
+            
+            # 👇 این لیست، پیام‌های خطای سرور رو ذخیره می‌کنه تا بهت نشون بدیم 👇
+            debug_logs = []
 
             for i in range(7):
                 check_date = today - jdatetime.timedelta(days=i)
@@ -181,25 +182,29 @@ async def handle_message(message: Message) -> None:
                 
                 res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=15)
                 
-                if res.status_code == 200:
-                    data = res.json()
-                    if data and len(data) > 0:
-                        found_data = data
-                        date_found_str = check_date.strftime("%Y/%m/%d")
-                        break # دیتا پیدا شد
-                elif res.status_code in [401, 403, 429]:
-                    # خطای محدودیت یا احراز هویت
-                    api_error_msg = f"محدودیت درخواست سرور (کد {res.status_code})"
-                    break # دیگه تلاش نکن، کلید مشکل داره
+                # ثبت وضعیت هر روز برای بررسی
+                debug_logs.append(f"روز {date_str}: کد {res.status_code} | پاسخ: {res.text[:30]}...")
                 
-                await asyncio.sleep(1) # ۱ ثانیه صبر بین درخواست‌ها
-
-            if api_error_msg:
-                await message.answer(f"⚠️ {api_error_msg}. لطفاً چند ساعت دیگر (یا فردا) دوباره امتحان کنید. سهمیه کلید رایگان تمام شده است.")
-                return
+                if res.status_code == 200:
+                    try:
+                        data = res.json()
+                        if isinstance(data, list) and len(data) > 0:
+                            found_data = data
+                            date_found_str = check_date.strftime("%Y/%m/%d")
+                            break
+                    except:
+                        pass
+                
+                await asyncio.sleep(1)
 
             if not found_data:
                 await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
+                
+                # 👇 این بخش رو اضافه کردم که خطای واقعی سرور رو بهت نشون بده 👇
+                debug_msg = "🛠 **گزارش عیب‌یابی سرور برس‌اپی:**\n\n"
+                debug_msg += "\n".join(debug_logs)
+                debug_msg += "\n\n(این پیام فقط برای تست است و بعداً حذف می‌شود)"
+                await message.answer(debug_msg)
                 return
 
             # فیلتر و مرتب‌سازی

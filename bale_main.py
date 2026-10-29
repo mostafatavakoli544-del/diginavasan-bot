@@ -7,7 +7,7 @@ import socketserver
 import pytz
 import asyncio
 import jdatetime
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.enums import ParseMode
@@ -165,11 +165,14 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آخرین آمار معاملات کالا...")
         try:
-            today = jdatetime.date.today()
-            headers = {'User-Agent': 'Mozilla/5.0'}
+            # محاسبه تاریخ دقیق به وقت تهران برای جلوگیری از خطای تایم‌زون رندر
+            now_tehran = datetime.now(pytz.timezone('Asia/Tehran'))
+            today = jdatetime.date.fromgregorian(date=now_tehran.date())
             
+            headers = {'User-Agent': 'Mozilla/5.0'}
             found_data = None
             date_found_str = ""
+            api_error_msg = ""
 
             for i in range(7):
                 check_date = today - jdatetime.timedelta(days=i)
@@ -183,26 +186,31 @@ async def handle_message(message: Message) -> None:
                     if data and len(data) > 0:
                         found_data = data
                         date_found_str = check_date.strftime("%Y/%m/%d")
-                        break
+                        break # دیتا پیدا شد
+                elif res.status_code in [401, 403, 429]:
+                    # خطای محدودیت یا احراز هویت
+                    api_error_msg = f"محدودیت درخواست سرور (کد {res.status_code})"
+                    break # دیگه تلاش نکن، کلید مشکل داره
                 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1) # ۱ ثانیه صبر بین درخواست‌ها
+
+            if api_error_msg:
+                await message.answer(f"⚠️ {api_error_msg}. لطفاً چند ساعت دیگر (یا فردا) دوباره امتحان کنید. سهمیه کلید رایگان تمام شده است.")
+                return
 
             if not found_data:
                 await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
                 return
 
-            # فیلتر کردن کالاهای بدون قیمت و مرتب‌سازی بر اساس ارزش معامله
+            # فیلتر و مرتب‌سازی
             valid_items = [item for item in found_data if item.get('pc') is not None and item.get('l30')]
             valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
-            
-            # برداشتن ۱۰ کالای برتر (بدون ادغام)
             top_items = valid_items[:10]
 
             if not top_items:
                 await message.answer("⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد.")
                 return
 
-            # 📚 دیکشنری توضیحات برای افزایش اطلاعات عمومی کاربر 📚
             descriptions = {
                 "تختال": "اسلب یا تختال، محصول نیمه‌ساخته فولادی است که مواد اولیه تولید ورق‌های فولادی محسوب می‌شود.",
                 "ورق گرم": "ورقی که در دمای بالا نورد می‌شود. در صنایع ساختمانی و خودروسازی کاربرد دارد.",
@@ -233,19 +241,18 @@ async def handle_message(message: Message) -> None:
                 msg += f"🏭 کارخانه: {producer}\n"
                 msg += f"💰 قیمت: {md.code(price_str)} تومان | 📦 حجم: {md.code(volume_str)} تن\n"
                 
-                # جستجوی کلمه کلیدی در اسم کالا برای پیدا کردن توضیح مناسب
                 for key, desc in descriptions.items():
                     if key in name:
                         msg += f"💡 {desc}\n"
-                        break # وقتی توضیح پیدا شد، از این حلقه خارج شو
+                        break
                 
-                msg += "\n" # یک خط فاصله بین کالاها
+                msg += "\n"
 
             msg += "_(بر اساس ۱۰ کالای با بالاترین ارزش معامله)_"
             await message.answer(msg)
             
         except requests.exceptions.Timeout:
-            await message.answer("❌ سرور بورس کالا پاسخ نداد (تایم‌اوت). لطفاً چند دقیقه دیگر تلاش کنید.")
+            await message.answer("❌ سرور بورس کالا پاسخ نداد (تایم‌اوت).")
         except Exception as e:
             await message.answer(f"❌ خطای شبکه در بازار کالا: {str(e)}")
 

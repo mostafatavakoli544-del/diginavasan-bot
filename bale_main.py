@@ -165,92 +165,60 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آخرین آمار معاملات کالا...")
         try:
+            # چون دیتا ۱۵ هزار خطه، یک هفته اخیر رو می‌گیریم تا مطمئن باشیم آخرین معاملات رو داریم
             today = jdatetime.date.today()
-            target_commodities = {
-                "مس کاتد": "پایه سیم و کابل",
-                "آهن اسفنجی": "جایگزین آهن‌قراضه در کوره",
-                "گندله سنگ آهن": "مواد اولیه کوره بلند",
-                "وکیوم باتوم": "پایه قیر و آسفالت",
-                "شمش آلومینیوم": "فلز سبک صنایع",
-                "کنسانتره سنگ آهن": "پودر غلیظ‌شده سنگ آهن"
-            }
+            seven_days_ago = today - jdatetime.timedelta(days=7)
             
-            found_items = {}
-            date_found_str = ""
+            start_date_str = seven_days_ago.strftime("%Y-%m-%d")
+            end_date_str = today.strftime("%Y-%m-%d")
+
             headers = {'User-Agent': 'Mozilla/5.0'}
+            url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={start_date_str}&date_end={end_date_str}"
+            
+            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=20)
+            
+            if res.status_code == 200:
+                data = res.json()
+                if not data:
+                    await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
+                    return
 
-            # حلقه عقب‌گرد هوشمند (تا ۷ روز قبل)
-            for i in range(7):
-                check_date = today - jdatetime.timedelta(days=i)
-                date_str = check_date.strftime("%Y-%m-%d")
-                url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={date_str}&date_end={date_str}"
+                # 🌟 استراتژی جدید: مرتب‌سازی کالاها بر اساس ارزش معاملات (tval) 🌟
+                # اینطوری مهم‌ترین و پرپول‌ترین معاملات اول لیست قرار می‌گیرن
+                valid_items = [item for item in data if item.get('pc') is not None and item.get('l30')]
+                valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
                 
-                res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
+                # فقط ۱۰ کالای برتر رو برمی‌داریم تا پیام خیلی طولانی نشه
+                top_items = valid_items[:10]
+
+                if not top_items:
+                    await message.answer("⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد.")
+                    return
+
+                # پیدا کردن آخرین تاریخ معامله
+                latest_date = top_items[0].get('date_trade', 'نامشخص')
+
+                msg = f"📦 {md.bold('مهم‌ترین معاملات بورس کالا')}\n"
+                msg += f"🗓 آخرین تاریخ معامله: {md.code(latest_date)}\n"
+                msg += f"⏰ {md.code(time_str)}\n\n"
                 
-                if res.status_code == 200:
-                    data = res.json()
-                    if data:
-                        for item in data:
-                            name = item.get('l30', '')
-                            for key in target_commodities.keys():
-                                if key in name:
-                                    raw_price = item.get('pc')
-                                    if raw_price is None:
-                                        continue
-                                    
-                                    price_toman = raw_price / 10
-                                    volume = item.get('volume_contract') or 0
-                                    
-                                    if key not in found_items or item.get('date_trade') > found_items[key]['date']:
-                                        found_items[key] = {
-                                            "price": price_toman,
-                                            "volume": volume,
-                                            "date": item.get('date_trade')
-                                        }
-                        if found_items:
-                            date_found_str = check_date.strftime("%Y/%m/%d")
-                            break # به محض پیدا کردن دیتا، حلقه رو متوقف کن
-                elif res.status_code == 400:
-                    continue # اگه ۴۰۰ داد (تعطیل بود)، برو روز قبل رو چک کن
+                for item in top_items:
+                    name = item.get('l30', 'نامشخص')
+                    price_toman = item.get('pc', 0) / 10
+                    volume = item.get('volume_contract') or 0
+                    
+                    msg += f"🔹 {md.bold(name)}\n"
+                    msg += f"   قیمت: {md.code(f'{price_toman:,.0f}')} تومان | حجم: {md.code(f'{volume:,}')} تن\n"
 
-            if not found_items:
-                await message.answer("⚠️ در ۷ روز گذشته معامله‌ای برای کالاهای هدف ثبت نشده است.")
-                return
-
-            msg = f"📦 {md.bold('آخرین معاملات بورس کالا')}\n"
-            msg += f"🗓 تاریخ معاملات: {md.code(date_found_str)}\n"
-            msg += f"⏰ {md.code(time_str)}\n\n"
+                msg += "\n_(بر اساس ۱۰ کالای با بالاترین ارزش معامله در بازار)_"
+                await message.answer(msg)
             
-            msg += f"🥇 {md.bold('فلزات اساسی:')}\n"
-            if "مس کاتد" in found_items:
-                i_data = found_items["مس کاتد"]
-                price_str = f"{i_data['price']:,.0f}"
-                vol_str = f"{i_data['volume']:,}"
-                msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-            if "شمش آلومینیوم" in found_items:
-                i_data = found_items["شمش آلومینیوم"]
-                price_str = f"{i_data['price']:,.0f}"
-                vol_str = f"{i_data['volume']:,}"
-                msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-            
-            msg += f"\n🏗️ {md.bold('فولاد و مواد معدنی:')}\n"
-            for key in ["آهن اسفنجی", "گندله سنگ آهن", "کنسانتره سنگ آهن"]:
-                if key in found_items:
-                    i_data = found_items[key]
-                    price_str = f"{i_data['price']:,.0f}"
-                    vol_str = f"{i_data['volume']:,}"
-                    msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-            
-            msg += f"\n🛢️ {md.bold('انرژی و فرآورده‌ها:')}\n"
-            if "وکیوم باتوم" in found_items:
-                i_data = found_items["وکیوم باتوم"]
-                price_str = f"{i_data['price']:,.0f}"
-                vol_str = f"{i_data['volume']:,}"
-                msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
-
-            msg += "\n_(قیمت‌ها بر اساس آخرین معاملات ثبت‌شده در بازار است)_"
-            await message.answer(msg)
-            
+            elif res.status_code == 400:
+                await message.answer("⚠️ امروز معامله‌ای ثبت نشده (احتمالاً بازار تعطیل است).")
+            else:
+                await message.answer(f"❌ خطای سرور (کد {res.status_code}).")
+        except requests.exceptions.Timeout:
+            await message.answer("❌ سرور بورس کالا پاسخ نداد (تایم‌اوت). لطفاً چند دقیقه دیگر تلاش کنید.")
         except Exception as e:
             await message.answer(f"❌ خطای شبکه در بازار کالا: {str(e)}")
 

@@ -165,58 +165,61 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آخرین آمار معاملات کالا...")
         try:
-            # چون دیتا ۱۵ هزار خطه، یک هفته اخیر رو می‌گیریم تا مطمئن باشیم آخرین معاملات رو داریم
             today = jdatetime.date.today()
-            seven_days_ago = today - jdatetime.timedelta(days=7)
-            
-            start_date_str = seven_days_ago.strftime("%Y-%m-%d")
-            end_date_str = today.strftime("%Y-%m-%d")
-
             headers = {'User-Agent': 'Mozilla/5.0'}
-            url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={start_date_str}&date_end={end_date_str}"
             
-            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=20)
-            
-            if res.status_code == 200:
-                data = res.json()
-                if not data:
-                    await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
-                    return
+            found_data = None
+            date_found_str = ""
 
-                # 🌟 استراتژی جدید: مرتب‌سازی کالاها بر اساس ارزش معاملات (tval) 🌟
-                # اینطوری مهم‌ترین و پرپول‌ترین معاملات اول لیست قرار می‌گیرن
-                valid_items = [item for item in data if item.get('pc') is not None and item.get('l30')]
-                valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
+            # 👇 حلقه عقب‌گرد هوشمند: حداکثر ۷ روز به عقب می‌ره تا بازار باز پیدا کنه 👇
+            for i in range(7):
+                check_date = today - jdatetime.timedelta(days=i)
+                date_str = check_date.strftime("%Y-%m-%d")
+                url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={date_str}&date_end={date_str}"
                 
-                # فقط ۱۰ کالای برتر رو برمی‌داریم تا پیام خیلی طولانی نشه
-                top_items = valid_items[:10]
-
-                if not top_items:
-                    await message.answer("⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد.")
-                    return
-
-                # پیدا کردن آخرین تاریخ معامله
-                latest_date = top_items[0].get('date_trade', 'نامشخص')
-
-                msg = f"📦 {md.bold('مهم‌ترین معاملات بورس کالا')}\n"
-                msg += f"🗓 آخرین تاریخ معامله: {md.code(latest_date)}\n"
-                msg += f"⏰ {md.code(time_str)}\n\n"
+                res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=15)
                 
-                for item in top_items:
-                    name = item.get('l30', 'نامشخص')
-                    price_toman = item.get('pc', 0) / 10
-                    volume = item.get('volume_contract') or 0
-                    
-                    msg += f"🔹 {md.bold(name)}\n"
-                    msg += f"   قیمت: {md.code(f'{price_toman:,.0f}')} تومان | حجم: {md.code(f'{volume:,}')} تن\n"
+                if res.status_code == 200:
+                    data = res.json()
+                    if data and len(data) > 0:
+                        found_data = data
+                        date_found_str = check_date.strftime("%Y/%m/%d")
+                        break # دیتا پیدا شد، از حلقه خارج شو
+                
+                # کمی صبر می‌کنیم تا به API فشار نیاد (ضد بن شدن)
+                await asyncio.sleep(0.5)
 
-                msg += "\n_(بر اساس ۱۰ کالای با بالاترین ارزش معامله در بازار)_"
-                await message.answer(msg)
+            if not found_data:
+                await message.answer("⚠️ در ۷ روز گذشته معامله‌ای در بورس کالا ثبت نشده است.")
+                return
+
+            # مرتب‌سازی بر اساس ارزش معاملات (tval) و انتخاب ۱۰ کالای برتر
+            valid_items = [item for item in found_data if item.get('pc') is not None and item.get('l30')]
+            valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
+            top_items = valid_items[:10]
+
+            if not top_items:
+                await message.answer("⚠️ معامله‌ای با قیمت ثبت‌شده یافت نشد.")
+                return
+
+            msg = f"📦 {md.bold('مهم‌ترین معاملات بورس کالا')}\n"
+            msg += f"🗓 آخرین تاریخ معامله: {md.code(date_found_str)}\n"
+            msg += f"⏰ {md.code(time_str)}\n\n"
             
-            elif res.status_code == 400:
-                await message.answer("⚠️ امروز معامله‌ای ثبت نشده (احتمالاً بازار تعطیل است).")
-            else:
-                await message.answer(f"❌ خطای سرور (کد {res.status_code}).")
+            for item in top_items:
+                name = item.get('l30', 'نامشخص')
+                # محاسبه قیمت به تومان (تقسیم بر ۱۰)
+                price_toman = item.get('pc', 0) / 10
+                # استفاده از متغیرهای جداگانه برای جلوگیری از خطای سینتکس در رشته‌های تو در تو
+                price_str = f"{price_toman:,.0f}"
+                volume_str = f"{item.get('volume_contract', 0):,}"
+                
+                msg += f"🔹 {md.bold(name)}\n"
+                msg += f"   قیمت: {md.code(price_str)} تومان | حجم: {md.code(volume_str)} تن\n"
+
+            msg += "\n_(بر اساس ۱۰ کالای با بالاترین ارزش معامله در بازار)_"
+            await message.answer(msg)
+            
         except requests.exceptions.Timeout:
             await message.answer("❌ سرور بورس کالا پاسخ نداد (تایم‌اوت). لطفاً چند دقیقه دیگر تلاش کنید.")
         except Exception as e:

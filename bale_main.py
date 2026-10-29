@@ -9,7 +9,6 @@ import asyncio
 from datetime import datetime
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
-from baleio.enums import ParseMode
 from baleio.filters import CommandStart
 from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
@@ -17,7 +16,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 BALE_TOKEN = os.environ.get("BALE_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
-CHANNEL_ID = "@diginavasan"  # 👈 آیدی کانال شما
+CHANNEL_ID = "@diginavasan"
 ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
@@ -32,7 +31,7 @@ def get_dates_info():
 
 def get_nerkh_price(key):
     try:
-        response = requests.get("https://nerkh.jahankhahan.shop/data/live.json", timeout=10)
+        response = requests.get("https://nerkh.jahankhahan.shop/data/live.json", timeout=30)
         if response.status_code == 200:
             price = response.json()['rates'].get(key)
             return int(price) if price else 0
@@ -45,46 +44,72 @@ def get_nerkh_price_safe(keys_list):
         if price > 0: return f"{price:,.0f}"
     return "0"
 
+# 👇 تابع مقایسه ۵ صرافی 👇
 def get_multi_exchange_usdt_prices():
     results = {}
     headers = {'User-Agent': 'Mozilla/5.0'}
+
+    # ۱. نوبیتکس
     try:
         url = "https://apiv2.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls"
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            key = "usdt-rls"
-            if key in res.json().get('stats', {}):
-                results['نوبیتکس'] = int(float(res.json()['stats'][key]['latest']) / 10)
+        res = requests.get(url, headers=headers, timeout=30)
+        if res.status_code == 200 and 'usdt-rls' in res.json().get('stats', {}):
+            results['نوبیتکس'] = int(float(res.json()['stats']['usdt-rls']['latest']) / 10)
     except Exception: pass
+
+    # ۲. والکس
     try:
         url = "https://api.wallex.ir/v1/markets"
-        res = requests.get(url, headers=headers, timeout=10)
+        res = requests.get(url, headers=headers, timeout=30)
         if res.status_code == 200:
             data = res.json()
-            if 'result' in data and 'symbols' in data['result'] and 'USDTTMN' in data['result']['symbols']:
+            if 'USDTTMN' in data.get('result', {}).get('symbols', {}):
                 results['والکس'] = int(float(data['result']['symbols']['USDTTMN']['stats']['lastPrice']))
     except Exception: pass
+
+    # ۳. رمزینکس
     try:
         url = "https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs"
-        res = requests.get(url, headers=headers, timeout=15)
+        res = requests.get(url, headers=headers, timeout=30)
         if res.status_code == 200:
             data = res.json()
-            if 'data' in data:
-                for item in data['data']:
-                    if item.get('name', {}).get('en') == 'tether/rial':
-                        price_rls = float(item.get('sell', 0))
-                        if price_rls > 0: results['رمزینکس'] = int(price_rls / 10)
-                        break
+            for item in data.get('data', []):
+                if item.get('name', {}).get('en') == 'tether/rial':
+                    if float(item.get('sell', 0)) > 0:
+                        results['رمزینکس'] = int(float(item['sell']) / 10)
+                    break
     except Exception: pass
+
+    # ۴. بیت‌پین
+    try:
+        url = "https://api.bitpin.ir/api/v1/mkt/tickers/"
+        res = requests.get(url, headers=headers, timeout=30)
+        if res.status_code == 200:
+            for item in res.json():
+                if item.get('symbol') == 'USDT_IRT': # بیت‌پین معمولاً به تومان (IRT) قیمت میده
+                    results['بیت‌پین'] = int(float(item.get('price')))
+                    break
+    except Exception: pass
+
+    # ۵. تبدیل (Tabdeal)
+    try:
+        url = "https://api.tabdeal.org/api/v1/market/statistics"
+        res = requests.get(url, headers=headers, timeout=30)
+        if res.status_code == 200:
+            data = res.json()
+            if 'USDTIRT' in data:
+                results['تبدیل'] = int(float(data['USDTIRT'].get('lastPrice', 0)))
+    except Exception: pass
+
     return results
 
 def get_crypto_prices_toman():
     try:
-        coins = {"BTC": "btc", "ETH": "eth", "USDT": "usdt", "BNB": "bnb", "TRX": "trx", "SOL": "sol", "DOGE": "doge", "TON": "ton"}
+        coins = {"BTC": "btc", "ETH": "eth", "BNB": "bnb", "TRX": "trx", "SOL": "sol", "DOGE": "doge", "TON": "ton"}
         prices = {}
         for symbol, coin_id in coins.items():
             url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={coin_id}&dstCurrency=rls"
-            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
             if res.status_code == 200:
                 key = f"{coin_id}-rls"
                 if key in res.json().get('stats', {}):
@@ -115,15 +140,13 @@ def get_main_menu():
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 def gen_morning_msg():
-    return "🌅 **بسم الله الرحمن الرحیم**\n\nصبحتون بخیر و پر از انرژی ☀️\nروزتون پر از سود و موفقیت باشه. امروز رو با توکل به خدا و یه برنامه عالی شروع کنیم. 🚀"
+    return "🌅 **بسم الله الرحمن الرحیم**\n\nصبحتون بخیر و پر از انرژی ☀️\nروزتون پر از سود و موفقیت باشه. 🚀"
 
 def gen_fiat_msg(time_str):
     msg = f"💱 {md.bold('قیمت لحظه‌ای ارزها')}\n⏰ {md.code(time_str)}\n\n"
     msg += f"💵 دلار = {md.code(get_nerkh_price_safe(['dollar', 'usd']))} تومان\n"
     msg += f"💶 یورو = {md.code(get_nerkh_price_safe(['euro', 'eur']))} تومان\n"
     msg += f"💷 پوند = {md.code(get_nerkh_price_safe(['pound', 'gbp']))} تومان\n"
-    msg += f"🇦🇪 درهم = {md.code(get_nerkh_price_safe(['aed']))} تومان\n"
-    msg += f"🇹🇷 لیر = {md.code(get_nerkh_price_safe(['lira']))} تومان"
     return msg
 
 def gen_gold_msg(time_str):
@@ -131,9 +154,6 @@ def gen_gold_msg(time_str):
     msg += f"🥇 طلا ۱۸ عیار = {md.code(get_nerkh_price_safe(['gold']))} تومان\n"
     msg += f"🥇 طلا ۲۴ عیار = {md.code(get_nerkh_price_safe(['gold24']))} تومان\n"
     msg += f"🪙 سکه امامی = {md.code(get_nerkh_price_safe(['coin']))} تومان\n"
-    msg += f"🪙 سکه بهار = {md.code(get_nerkh_price_safe(['bahar']))} تومان\n"
-    msg += f"🪙 نیم سکه = {md.code(get_nerkh_price_safe(['half']))} تومان\n"
-    msg += f"🪙 ربع سکه = {md.code(get_nerkh_price_safe(['quarter']))} تومان"
     return msg
 
 def gen_crypto_msg(time_str):
@@ -141,9 +161,8 @@ def gen_crypto_msg(time_str):
     msg = f"🪙 {md.bold('قیمت لحظه‌ای ارز دیجیتال')}\n⏰ {md.code(time_str)}\n\n"
     if crypto:
         for sym, prc in crypto.items():
-            if sym != "USDT":
-                emoji = "🟢" if sym in ["BTC", "ETH"] else "🔹"
-                msg += f"تومان {md.code(prc)} = {md.code(sym)} {emoji}\n"
+            emoji = "🟢" if sym in ["BTC", "ETH"] else "🔹"
+            msg += f"{md.code(sym)} {emoji} = {md.code(prc)} تومان\n"
     else:
         msg += "⚠️ خطا در دریافت اطلاعات."
     return msg
@@ -165,12 +184,6 @@ def gen_usdt_msg(time_str):
         msg += "⚠️ خطا در دریافت اطلاعات."
     return msg
 
-def gen_infographic_msg(time_str):
-    msg = f"📊 {md.bold('خلاصه وضعیت بازار')}\n⏰ {md.code(time_str)}\n\n"
-    msg += "📈 وضعیت کلی بازار در حال بررسی است...\n_(به زودی اینفوگرافیک اختصاصی این بخش فعال می‌شود)_"
-    return msg
-
-# 👇 زمان‌بند کانال (در حالت تست، محدودیت زمانی برداشته شده) 👇
 async def channel_scheduler(bot: Bot):
     last_sent_minute = -1
     while True:
@@ -179,18 +192,16 @@ async def channel_scheduler(bot: Bot):
             hour, minute = now.hour, now.minute
             time_str = now.strftime('%H:%M')
 
-            # 👇 برای تست، به جای if 8 <= hour < 20: از if True: استفاده شده است 👇
+            # 👇 برای تست، شرط زمانی موقتا برداشته شده (هر دقیقه پیام میده) 👇
             if True:
                 if minute != last_sent_minute:
-                    total_minutes = (hour * 60) + minute # محاسبه ساده برای تست
-                    msg_to_send = None
-
-                    # در حالت تست، هر ۱ دقیقه یک نوع پیام را پشت سر هم می‌فرستد
+                    # برای تست، هر دقیقه یک نوع پیام رو میفرسته
                     if minute % 5 == 0: msg_to_send = gen_morning_msg()
                     elif minute % 5 == 1: msg_to_send = gen_fiat_msg(time_str)
                     elif minute % 5 == 2: msg_to_send = gen_gold_msg(time_str)
                     elif minute % 5 == 3: msg_to_send = gen_crypto_msg(time_str)
                     elif minute % 5 == 4: msg_to_send = gen_usdt_msg(time_str)
+                    else: msg_to_send = None
 
                     if msg_to_send:
                         await bot.send_message(chat_id=CHANNEL_ID, text=msg_to_send)
@@ -198,7 +209,7 @@ async def channel_scheduler(bot: Bot):
                         last_sent_minute = minute
         except Exception as e:
             logging.error(f"Scheduler Error: {e}")
-        await asyncio.sleep(10) # هر ۱۰ ثانیه چک می‌کند
+        await asyncio.sleep(10)
 
 dp = Dispatcher()
 
@@ -214,10 +225,14 @@ async def handle_message(message: Message) -> None:
 
     if text == "🚀 استارت / منوی اصلی" or text == "/start":
         await command_start_handler(message)
+        
     elif text == "🪙 قیمت ارز دیجیتال":
         await message.answer("⏳ در حال دریافت اطلاعات...")
-        msg = gen_crypto_msg(time_str) + "\n\n" + gen_usdt_msg(time_str)
-        await message.answer(msg)
+        # 👇 اینجا دو پیام جدا میفرسته تا قشنگ باشه 👇
+        await message.answer(gen_crypto_msg(time_str))
+        await asyncio.sleep(1) # یک ثانیه صبر میکنه
+        await message.answer(gen_usdt_msg(time_str))
+        
     elif text == "💱 قیمت ارزها":
         await message.answer(gen_fiat_msg(time_str))
     elif text == "🌕 قیمت طلا و سکه":
@@ -227,7 +242,7 @@ async def handle_message(message: Message) -> None:
         try:
             url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY.strip()}&type=1"
             headers = {'User-Agent': 'Mozilla/5.0'}
-            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
+            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=30)
             if res.status_code == 200:
                 data = res.json()
                 index_val = data.get('index', 0)
@@ -266,7 +281,7 @@ async def handle_message(message: Message) -> None:
         await message.answer(res)
 
 async def main() -> None:
-    bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())
     asyncio.create_task(channel_scheduler(bot))
     await dp.start_polling(bot)
 

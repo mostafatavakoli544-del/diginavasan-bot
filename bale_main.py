@@ -6,6 +6,7 @@ import http.server
 import socketserver
 import pytz
 import asyncio
+import jdatetime
 from datetime import datetime, time
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
@@ -84,6 +85,7 @@ def get_main_menu():
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
         [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
         [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="📈 شاخص بورس")],
+        [KeyboardButton(text="📦 بازار کالا")], # 👈 دکمه جدید بازار کالا
         [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
         [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
         [KeyboardButton(text="🚨 آلارم قیمتی"), KeyboardButton(text="🤖 چت با هوش مصنوعی")],
@@ -139,13 +141,12 @@ async def handle_message(message: Message) -> None:
             msg += "⚠️ خطا در دریافت اطلاعات ارز دیجیتال."
         await message.answer(msg)
 
-    # 👇 اینبار دیتا رو در لحظه می‌گیریم تا مطمئن باشیم خطا نمیده 👇
     elif text == "📈 شاخص بورس":
         await message.answer("⏳ در حال دریافت اطلاعات بورس...")
         try:
-            url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY}&type=1"
-            # اجرای درخواست در یک ترد جداگانه تا ربات فریز نشه
-            res = await asyncio.to_thread(requests.get, url, timeout=10)
+            url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY.strip()}&type=1"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
             
             if res.status_code == 200:
                 data = res.json()
@@ -165,6 +166,86 @@ async def handle_message(message: Message) -> None:
                 await message.answer(f"❌ خطا در دریافت اطلاعات. کد خطا: {res.status_code}")
         except Exception as e:
             await message.answer(f"❌ خطای شبکه: {str(e)}")
+
+    # 👇 بخش جدید: بازار کالا با دسته‌بندی و توضیحات 👇
+    elif text == "📦 بازار کالا":
+        await message.answer("⏳ در حال دریافت آمار معاملات کالا...")
+        try:
+            # گرفتن تاریخ امروز به شمسی برای API
+            today_shamsi = jdatetime.date.today().strftime("%Y-%m-%d")
+            
+            # آدرس API (تاریخ شروع و پایان رو امروز می‌ذاریم)
+            url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={today_shamsi}&date_end={today_shamsi}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            
+            res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
+            
+            if res.status_code == 200:
+                data = res.json()
+                if not data:
+                    await message.answer("⚠️ امروز هنوز معامله‌ای در بورس کالا ثبت نشده است.")
+                    return
+
+                # پیدا کردن آخرین معامله برای کالاهای مهم
+                target_commodities = {
+                    "مس کاتد": "پایه سیم و کابل",
+                    "آهن اسفنجی": "جایگزین آهن‌قراضه در کوره",
+                    "گندله سنگ آهن": "مواد اولیه کوره بلند",
+                    "وکیوم باتوم": "پایه قیر و آسفالت",
+                    "شمش آلومینیوم": "فلز سبک صنایع",
+                    "کنسانتره سنگ آهن": "پودر غلیظ‌شده سنگ آهن"
+                }
+                
+                found_items = {}
+                
+                # جستجو در لیست معاملات
+                for item in data:
+                    name = item.get('l30', '')
+                    for key in target_commodities.keys():
+                        if key in name:
+                            # قیمت پایانی به ریال است، تقسیم بر 10 می‌کنیم تا تومان شود
+                            price_toman = item.get('pc', 0) / 10
+                            volume = item.get('volume_contract', 0)
+                            
+                            # اگر قبلا پیدا شده بود، جدیدترین رو نگه داریم (بر اساس تاریخ معامله)
+                            if key not in found_items or item.get('date_trade') > found_items[key]['date']:
+                                found_items[key] = {
+                                    "price": price_toman,
+                                    "volume": volume,
+                                    "date": item.get('date_trade')
+                                }
+
+                # ساخت متن پیام
+                msg = f"📦 {md.bold('آخرین معاملات بورس کالا')}\n⏰ {md.code(time_str)}\n\n"
+                
+                # دسته ۱: فلزات اساسی
+                msg += f"🥇 {md.bold('فلزات اساسی:')}\n"
+                if "مس کاتد" in found_items:
+                    i = found_items["مس کاتد"]
+                    msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                if "شمش آلومینیوم" in found_items:
+                    i = found_items["شمش آلومینیوم"]
+                    msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                
+                # دسته ۲: فولاد و مواد معدنی
+                msg += f"\n🏗️ {md.bold('فولاد و مواد معدنی:')}\n"
+                for key in ["آهن اسفنجی", "گندله سنگ آهن", "کنسانتره سنگ آهن"]:
+                    if key in found_items:
+                        i = found_items[key]
+                        msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+                
+                # دسته ۳: انرژی و فرآورده‌ها
+                msg += f"\n🛢️ {md.bold('انرژی و فرآورده‌ها:')}\n"
+                if "وکیوم باتوم" in found_items:
+                    i = found_items["وکیوم باتوم"]
+                    msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(f'{i['price']:,.0f}')} تومان | حجم: {md.code(f'{i['volume']:,}')} تن\n"
+
+                msg += "\n_(قیمت‌ها بر اساس آخرین معامله ثبت‌شده در امروز است)_"
+                await message.answer(msg)
+            else:
+                await message.answer(f"❌ خطا در دریافت اطلاعات بازار کالا. کد خطا: {res.status_code}")
+        except Exception as e:
+            await message.answer(f"❌ خطای شبکه در بازار کالا: {str(e)}")
 
     elif text == "🤖 چت با هوش مصنوعی":
         await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")

@@ -6,13 +6,13 @@ import http.server
 import socketserver
 import pytz
 import asyncio
+import jdatetime
 from datetime import datetime, time
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.enums import ParseMode
 from baleio.filters import CommandStart
 from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from supabase import create_client, Client
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -21,12 +21,8 @@ PORT = int(os.environ.get("PORT", 10000))
 CHANNEL_ID = "@diginavasan"
 ADMIN_ID = 718840144
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
@@ -169,9 +165,9 @@ async def handle_message(message: Message) -> None:
     elif text == "📦 بازار کالا":
         await message.answer("⏳ در حال دریافت آمار معاملات کالا...")
         try:
-            # استفاده از تاریخ 18 خرداد که دیتای تستی داره
-            test_date = "1404-03-18" 
-            url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={test_date}&date_end={test_date}"
+            # 👇 اینجا تاریخ رو داینامیک کردیم (تاریخ شمسی امروز) 👇
+            today_shamsi = jdatetime.date.today().strftime("%Y-%m-%d")
+            url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={today_shamsi}&date_end={today_shamsi}"
             headers = {'User-Agent': 'Mozilla/5.0'}
             
             res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
@@ -179,7 +175,7 @@ async def handle_message(message: Message) -> None:
             if res.status_code == 200:
                 data = res.json()
                 if not data:
-                    await message.answer("⚠️ برای این تاریخ معامله‌ای در بورس کالا ثبت نشده است.")
+                    await message.answer("⚠️ امروز معامله‌ای در بورس کالا ثبت نشده است (یا بازار تعطیل است).")
                     return
 
                 target_commodities = {
@@ -197,10 +193,9 @@ async def handle_message(message: Message) -> None:
                     name = item.get('l30', '')
                     for key in target_commodities.keys():
                         if key in name:
-                            # 👇 اینجا باگ NoneType رو برطرف کردیم (اگر None بود صفر میذاره) 👇
                             raw_price = item.get('pc')
                             if raw_price is None:
-                                continue # اگر قیمت پایانی ثبت نشده بود، کالا رو رد کن
+                                continue
                             
                             price_toman = raw_price / 10
                             volume = item.get('volume_contract') or 0
@@ -211,6 +206,10 @@ async def handle_message(message: Message) -> None:
                                     "volume": volume,
                                     "date": item.get('date_trade')
                                 }
+
+                if not found_items:
+                    await message.answer("⚠️ امروز برای کالاهای هدف ما معامله‌ای ثبت نشده است.")
+                    return
 
                 msg = f"📦 {md.bold('آخرین معاملات بورس کالا')}\n⏰ {md.code(time_str)}\n\n"
                 
@@ -256,7 +255,6 @@ async def main() -> None:
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    threading.run_dummy_server = run_dummy_server # اصلاح نام‌گذاری برای وضوح
     threading.Thread(target=run_dummy_server, daemon=True).start()
     print("Starting Bale Bot...")
     asyncio.run(main())

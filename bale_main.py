@@ -179,7 +179,7 @@ async def handle_message(message: Message) -> None:
             date_found_str = ""
             headers = {'User-Agent': 'Mozilla/5.0'}
 
-            # 👇 حلقه عقب‌گرد هوشمند (تا ۷ روز قبل) 👇
+            # حلقه عقب‌گرد هوشمند (تا ۷ روز قبل)
             for i in range(7):
                 check_date = today - jdatetime.timedelta(days=i)
                 date_str = check_date.strftime("%Y-%m-%d")
@@ -224,21 +224,29 @@ async def handle_message(message: Message) -> None:
             msg += f"🥇 {md.bold('فلزات اساسی:')}\n"
             if "مس کاتد" in found_items:
                 i_data = found_items["مس کاتد"]
-                msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+                price_str = f"{i_data['price']:,.0f}"
+                vol_str = f"{i_data['volume']:,}"
+                msg += f"🔹 {md.bold('مس کاتد')} ({target_commodities['مس کاتد']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
             if "شمش آلومینیوم" in found_items:
                 i_data = found_items["شمش آلومینیوم"]
-                msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+                price_str = f"{i_data['price']:,.0f}"
+                vol_str = f"{i_data['volume']:,}"
+                msg += f"🔹 {md.bold('شمش آلومینیوم')} ({target_commodities['شمش آلومینیوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
             
             msg += f"\n🏗️ {md.bold('فولاد و مواد معدنی:')}\n"
             for key in ["آهن اسفنجی", "گندله سنگ آهن", "کنسانتره سنگ آهن"]:
                 if key in found_items:
                     i_data = found_items[key]
-                    msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+                    price_str = f"{i_data['price']:,.0f}"
+                    vol_str = f"{i_data['volume']:,}"
+                    msg += f"🔹 {md.bold(key)} ({target_commodities[key]})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
             
             msg += f"\n🛢️ {md.bold('انرژی و فرآورده‌ها:')}\n"
             if "وکیوم باتوم" in found_items:
                 i_data = found_items["وکیوم باتوم"]
-                msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(f'{i_data[chr(39)+chr(112)+chr(114)+chr(105)+chr(99)+chr(101)+chr(39)]:,.0f}')} تومان | حجم: {md.code(f'{i_data[chr(39)+chr(118)+chr(111)+chr(108)+chr(117)+chr(109)+chr(101)+chr(39)]:,}')} تن\n"
+                price_str = f"{i_data['price']:,.0f}"
+                vol_str = f"{i_data['volume']:,}"
+                msg += f"🔹 {md.bold('وکیوم باتوم')} ({target_commodities['وکیوم باتوم']})\n   قیمت: {md.code(price_str)} تومان | حجم: {md.code(vol_str)} تن\n"
 
             msg += "\n_(قیمت‌ها بر اساس آخرین معاملات ثبت‌شده در بازار است)_"
             await message.answer(msg)

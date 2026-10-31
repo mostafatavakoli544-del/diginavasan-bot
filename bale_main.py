@@ -6,8 +6,9 @@ import http.server
 import socketserver
 import pytz
 import asyncio
+import jdatetime
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.filters import CommandStart
@@ -48,6 +49,9 @@ DEFAULT_PLATE_DATA = {
 CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
 CITY_TO_CODES = {}
 
+# فوتر ثابت برای تمام پیام‌های کانال
+CHANNEL_FOOTER = "\n\n────────────\n🤖 [ورود به ربات دیجی نوسان](https://ble.ir/diginavasan_bot) | 📢 [کانال دیجی نوسان](https://ble.ir/diginavasan)"
+
 def rebuild_city_index():
     global CITY_TO_CODES
     CITY_TO_CODES = {}
@@ -79,6 +83,9 @@ def get_dates_info():
     now = datetime.now(pytz.timezone('Asia/Tehran'))
     return now.strftime('%H:%M'), now.hour
 
+# ==========================================
+# توابع دریافت اطلاعات
+# ==========================================
 def fetch_plate_data_from_url():
     global CURRENT_PLATE_DATA
     try:
@@ -87,9 +94,7 @@ def fetch_plate_data_from_url():
             new_data = res.json()
             CURRENT_PLATE_DATA.update(new_data)
             rebuild_city_index() 
-            logging.info("Plate data updated successfully from URL.")
-    except Exception as e:
-        logging.error(f"Failed to fetch plate data: {e}")
+    except Exception: pass
 
 async def update_plate_data_task():
     while True:
@@ -112,8 +117,7 @@ def get_nerkh_price_safe(keys_list):
     return "ناموجود"
 
 def format_price(price_str):
-    if price_str == "ناموجود":
-        return price_str
+    if price_str == "ناموجود": return price_str
     return f"`{price_str}` تومان"
 
 def get_multi_exchange_usdt_prices():
@@ -189,9 +193,11 @@ def get_weather(city):
             now = datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')
             return f"🌤 **وضعیت آب‌وهوای {city}**\n\n🌡 دما: {temp} درجه سانتی‌گراد\n☁️ وضعیت: {desc}\n💧 رطوبت: {humidity}%\n⏰ آخرین به‌روزرسانی: `{now}`"
         return "❌ شهر مورد نظر پیدا نشد."
-    except Exception:
-        return "❌ خطا در دریافت اطلاعات آب‌وهوا."
+    except Exception: return "❌ خطا در دریافت اطلاعات آب‌وهوا."
 
+# ==========================================
+# ساخت پیام‌های کش ربات
+# ==========================================
 def gen_fiat_msg(): return PRICE_CACHE["fiat"]
 def gen_gold_msg(): return PRICE_CACHE["gold"]
 def gen_crypto_msg(): return PRICE_CACHE["crypto"]
@@ -204,7 +210,6 @@ async def update_cache_task():
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             time_str = now.strftime('%H:%M')
             
-            # 👇 لیست ارزها (ین حذف شد و ۶ ارز جدید اضافه شد) 👇
             PRICE_CACHE["fiat"] = await asyncio.to_thread(lambda: (
                 f"💱 **قیمت لحظه‌ای ارزها**\n⏰ `{time_str}`\n\n"
                 f"💵 دلار = {format_price(get_nerkh_price_safe(['dollar', 'usd']))}\n"
@@ -266,30 +271,128 @@ async def update_cache_task():
             logging.error(f"Cache update error: {e}")
         await asyncio.sleep(30)
 
+# ==========================================
+# زمان‌بند کانال و پیام‌های اختصاصی
+# ==========================================
+async def fetch_kala_msg():
+    today = jdatetime.date.today()
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    found_data = None
+    date_found_str = ""
+    
+    for i in range(7):
+        check_date = today - jdatetime.timedelta(days=i)
+        date_str = check_date.strftime("%Y-%m-%d")
+        url = f"https://Api.BrsApi.ir/IME/Physical.php?key={BRS_API_KEY.strip()}&date_start={date_str}&date_end={date_str}"
+        res = await asyncio.to_thread(requests.get, url, headers=headers, timeout=30)
+        if res.status_code == 200:
+            try:
+                data = res.json()
+                if isinstance(data, list) and len(data) > 0:
+                    found_data = data
+                    date_found_str = check_date.strftime("%Y/%m/%d")
+                    break
+            except: pass
+        elif res.status_code == 402: return "⚠️ سهمیه API کالا تمام شده است."
+        await asyncio.sleep(1)
+
+    if not found_data: return "⚠️ در ۷ روز گذشته معامله‌ای ثبت نشده است."
+
+    valid_items = [item for item in found_data if item.get('pc') is not None and item.get('l30')]
+    valid_items.sort(key=lambda x: x.get('tval', 0), reverse=True)
+    top_items = valid_items[:10]
+
+    msg = f"📦 **مهم‌ترین معاملات بورس کالا**\n🗓 تاریخ: `{date_found_str}`\n\n"
+    for item in top_items:
+        name = item.get('l30', 'نامشخص')
+        producer = item.get('producer', 'نامشخص')
+        price_str = f"{item.get('pc', 0) / 10:,.0f}"
+        volume_str = f"{item.get('volume_contract') or 0:,}"
+        msg += f"🔹 **{name}**\n🏭 {producer}\n💰 قیمت: `{price_str}` تومان | 📦 حجم: `{volume_str}` تن\n\n"
+    
+    return msg + "_(بر اساس ۱۰ کالای با بالاترین ارزش معامله)_"
+
+async def fetch_bourse_msg():
+    try:
+        url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY.strip()}&type=1"
+        res = await asyncio.to_thread(requests.get, url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
+        if res.status_code == 200:
+            data = res.json()
+            return (
+                f"📈 **وضعیت شاخص‌های بورس تهران**\n\n"
+                f"🔹 **شاخص کل:** `{data.get('index', 0):,.0f}`\n"
+                f"⚖️ **شاخص هم‌وزن:** `{data.get('index_equalWeight', 0):,.0f}`\n"
+                f"🔴 وضعیت بازار: `{data.get('state', 'نامشخص')}`\n"
+            )
+        return "❌ خطا در دریافت بورس."
+    except Exception: return "❌ خطا در دریافت بورس."
+
+async def channel_scheduler(bot: Bot):
+    last_sent_minute = -1
+    while True:
+        try:
+            now = datetime.now(pytz.timezone('Asia/Tehran'))
+            hour, minute = now.hour, now.minute
+            
+            # بررسی اینکه آیا در این دقیقه پیامی فرستاده شده یا نه
+            if minute != last_sent_minute and 8 <= hour < 20:
+                current_time = f"{hour:02d}:{minute:02d}"
+                msg_to_send = None
+
+                # پیام‌های خاص در ساعت‌های مشخص
+                if current_time == "08:00":
+                    msg_to_send = "🌅 **بسم الله الرحمن الرحیم**\n\nامیدوارم روز خوب و پر از موفقیت رو آغاز کنید. ☀️\nفرصت‌ها منتظر نمی‌مانند؛ آغاز نرخ‌دهی بازار! 🚀💰"
+                elif current_time == "20:00":
+                    msg_to_send = "🌙 **شب بخیر**\n\nامیدوارم روز پرباری را سپری کرده باشید. شبی آرام و فردایی پر از موفقیت پیش رو داشته باشید. 🌌"
+                elif current_time == "12:45":
+                    bourse_text = await fetch_bourse_msg()
+                    msg_to_send = bourse_text + CHANNEL_FOOTER
+                elif current_time == "13:00":
+                    kala_text = await fetch_kala_msg()
+                    msg_to_send = kala_text + CHANNEL_FOOTER
+                
+                # چرخه ۱۵ دقیقه‌ای برای بقیه پیام‌ها
+                elif minute == 15:
+                    msg_to_send = gen_fiat_msg() + CHANNEL_FOOTER
+                elif minute == 30:
+                    msg_to_send = gen_gold_msg() + CHANNEL_FOOTER
+                elif minute == 45:
+                    msg_to_send = gen_usdt_msg() + CHANNEL_FOOTER
+                elif minute == 0 and hour != 8 and hour != 20:
+                    msg_to_send = gen_crypto_msg() + CHANNEL_FOOTER
+
+                if msg_to_send:
+                    await bot.send_message(chat_id=CHANNEL_ID, text=msg_to_send)
+                    logging.info(f"Channel message sent at {current_time}")
+                    last_sent_minute = minute
+                    
+        except Exception as e:
+            logging.error(f"Scheduler Error: {e}")
+        
+        await asyncio.sleep(15)
+
+# ==========================================
+# پلاک‌خوان
+# ==========================================
 async def check_plate(query):
     query = query.strip()
     if query.isdigit() and len(query) == 2:
         if query in CURRENT_PLATE_DATA:
             province = CURRENT_PLATE_DATA[query]
-            if "/" in province:
-                return f"🔍 **نتیجه:**\n\nکد `{query}` مشترک بین **{province}** است."
+            if "/" in province: return f"🔍 **نتیجه:**\n\nکد `{query}` مشترک بین **{province}** است."
             return f"🔍 **نتیجه:**\n\nکد `{query}` مربوط به **{province}** است."
-        else:
-            return f"❌ کد پلاک `{query}` معتبر نیست."
+        return f"❌ کد پلاک `{query}` معتبر نیست."
     else:
         if query in CITY_TO_CODES:
-            codes = CITY_TO_CODES[query]
-            code_list = "، ".join(codes)
-            return f"🔍 **نتیجه:**\n\nشهر/استان **{query}** دارای کدهای پلاک زیر است:\n\n`{code_list}`"
-        
-        found_match = False
+            return f"🔍 **نتیجه:**\n\nشهر/استان **{query}** دارای کدهای پلاک زیر است:\n\n`{', '.join(CITY_TO_CODES[query])}`"
         for city_name, codes in CITY_TO_CODES.items():
             if query in city_name or city_name in query:
-                code_list = "، ".join(codes)
-                return f"🔍 **نتیجه:**\n\nشهر/استان **{city_name}** (نزدیک به جستجوی شما) دارای کدهای پلاک زیر است:\n\n`{code_list}`"
-        
-        return f"❌ متاسفانه برای **{query}** کد پلاکی یافت نشد.\n\n💡 لطفاً نام استان یا شهرستان را به درستی وارد کنید (مثلاً: تهران، شیراز، اصفهان)."
+                return f"🔍 **نتیجه:**\n\nشهر/استان **{city_name}** (نزدیک به جستجوی شما) دارای کدهای پلاک زیر است:\n\n`{', '.join(codes)}`"
+        return f"❌ متاسفانه برای **{query}** کد پلاکی یافت نشد."
 
+# ==========================================
+# منو ربات
+# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
@@ -303,16 +406,14 @@ def get_main_menu():
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 def get_back_menu():
-    keyboard = [[KeyboardButton(text="🔙 بازگشت به منوی اصلی")]]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🔙 بازگشت به منوی اصلی")]], resize_keyboard=True)
 
 dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
     user_states.pop(message.from_user.id, None)
-    welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:"
-    await message.answer(welcome, reply_markup=get_main_menu())
+    await message.answer("سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:", reply_markup=get_main_menu())
 
 @dp.message()
 async def handle_message(message: Message) -> None:
@@ -326,8 +427,7 @@ async def handle_message(message: Message) -> None:
         return
 
     if current_state == "waiting_for_plate_query":
-        result = await check_plate(text)
-        await message.answer(result, reply_markup=get_back_menu())
+        await message.answer(await check_plate(text), reply_markup=get_back_menu())
 
     elif current_state == "gold_waiting_price":
         try:
@@ -335,8 +435,7 @@ async def handle_message(message: Message) -> None:
             if gold_price <= 0: raise ValueError
             user_states[user_id] = {"state": "gold_waiting_weight", "price": gold_price}
             await message.answer("⚖️ حالا وزن طلا را به **گرم** وارد کنید (مثلاً: 5):", reply_markup=get_back_menu())
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای قیمت وارد کنید.", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
             
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_weight":
         try:
@@ -345,8 +444,7 @@ async def handle_message(message: Message) -> None:
             current_state["weight"] = weight
             current_state["state"] = "gold_waiting_wage"
             await message.answer("🛠 درصد اجرت ساخت را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_wage":
         try:
@@ -355,8 +453,7 @@ async def handle_message(message: Message) -> None:
             current_state["wage_pct"] = wage_pct
             current_state["state"] = "gold_waiting_profit"
             await message.answer("🏪 درصد سود فروشنده را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_profit":
         try:
@@ -365,47 +462,31 @@ async def handle_message(message: Message) -> None:
             current_state["profit_pct"] = profit_pct
             current_state["state"] = "gold_waiting_tax"
             await message.answer("📄 درصد مالیات بر ارزش افزوده را وارد کنید (معمولاً 9):", reply_markup=get_back_menu())
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_tax":
         try:
             tax_pct = float(text)
             if tax_pct < 0: raise ValueError
-            
             price = current_state["price"]
             weight = current_state["weight"]
-            wage_pct = current_state["wage_pct"]
-            profit_pct = current_state["profit_pct"]
+            wage = (weight * price) * (current_state["wage_pct"] / 100)
+            profit = (weight * price) * (current_state["profit_pct"] / 100)
+            tax = ((weight * price) + wage + profit) * (tax_pct / 100)
+            total = (weight * price) + wage + profit + tax
             
-            raw_price = weight * price
-            wage = raw_price * (wage_pct / 100)
-            profit = raw_price * (profit_pct / 100)
-            tax = (raw_price + wage + profit) * (tax_pct / 100)
-            total_price = raw_price + wage + profit + tax
-
-            msg = f"🧮 **نتیجه محاسبه طلا**\n\n"
-            msg += f"💰 قیمت هر گرم: `{price:,.0f}` تومان\n"
-            msg += f"⚖️ وزن: `{weight}` گرم\n"
-            msg += f"📦 قیمت خام: `{raw_price:,.0f}` تومان\n"
-            msg += f"🛠 اجرت ساخت ({wage_pct}٪): `{wage:,.0f}` تومان\n"
-            msg += f"🏪 سود فروشنده ({profit_pct}٪): `{profit:,.0f}` تومان\n"
-            msg += f"📄 مالیات ({tax_pct}٪): `{tax:,.0f}` تومان\n\n"
-            msg += f"✅ **مبلغ نهایی خرید: `{total_price:,.0f}` تومان**"
-            
+            msg = f"🧮 **نتیجه محاسبه طلا**\n\n💰 قیمت هر گرم: `{price:,.0f}`\n⚖️ وزن: `{weight}` گرم\n📦 قیمت خام: `{weight * price:,.0f}`\n🛠 اجرت ({current_state['wage_pct']}٪): `{wage:,.0f}`\n🏪 سود ({current_state['profit_pct']}٪): `{profit:,.0f}`\n📄 مالیات ({tax_pct}٪): `{tax:,.0f}`\n\n✅ **مبلغ نهایی: `{total:,.0f}` تومان**"
             await message.answer(msg, reply_markup=get_main_menu())
             user_states.pop(user_id, None) 
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif current_state == "loan_waiting_amount":
         try:
             amount = float(text.replace(',', ''))
             if amount <= 0: raise ValueError
             user_states[user_id] = {"state": "loan_waiting_interest", "amount": amount}
-            await message.answer("📈 نرخ سود سالانه را وارد کنید (اگر بدون سود است، عدد 0 را بفرستید):", reply_markup=get_back_menu())
-        except ValueError:
-            await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.", reply_markup=get_back_menu())
+            await message.answer("📈 نرخ سود سالانه را وارد کنید (بدون سود=0):", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_interest":
         try:
@@ -413,109 +494,69 @@ async def handle_message(message: Message) -> None:
             if interest < 0: raise ValueError
             current_state["interest"] = interest
             current_state["state"] = "loan_waiting_months"
-            await message.answer("⏳ تعداد ماه‌های بازپرداخت را وارد کنید (مثلاً 12):", reply_markup=get_back_menu())
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای نرخ سود وارد کنید.", reply_markup=get_back_menu())
+            await message.answer("⏳ تعداد ماه‌های بازپرداخت:", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_months":
         try:
             months = int(text)
             if months <= 0: raise ValueError
-            
             amount = current_state["amount"]
-            annual_interest = current_state["interest"]
+            interest = current_state["interest"]
             
-            if annual_interest == 0:
-                monthly_payment = amount / months
-                total_repayment = amount
-                total_interest = 0
+            if interest == 0:
+                monthly = amount / months; total = amount; t_int = 0
             else:
-                monthly_rate = (annual_interest / 100) / 12
-                monthly_payment = amount * (monthly_rate * (1 + monthly_rate)**months) / ((1 + monthly_rate)**months - 1)
-                total_repayment = monthly_payment * months
-                total_interest = total_repayment - amount
+                r = (interest / 100) / 12
+                monthly = amount * (r * (1 + r)**months) / ((1 + r)**months - 1)
+                total = monthly * months; t_int = total - amount
 
-            msg = f"💸 **نتیجه محاسبه وام**\n\n"
-            msg += f"💵 مبلغ وام: `{amount:,.0f}` تومان\n"
-            msg += f"📈 نرخ سود سالانه: `{annual_interest}٪`\n"
-            msg += f"⏳ مدت بازپرداخت: `{months}` ماه\n\n"
-            msg += f"💳 **قسط ماهانه: `{monthly_payment:,.0f}` تومان**\n"
-            msg += f"💰 مجموع بازپرداخت: `{total_repayment:,.0f}` تومان\n"
-            msg += f"📉 مجموع سود پرداختی: `{total_interest:,.0f}` تومان"
-
+            msg = f"💸 **نتیجه محاسبه وام**\n\n💵 مبلغ: `{amount:,.0f}`\n📈 سود: `{interest}٪`\n⏳ مدت: `{months}` ماه\n\n💳 **قسط ماهانه: `{monthly:,.0f}` تومان**\n💰 مجموع: `{total:,.0f}`\n📉 سود کل: `{t_int:,.0f}`"
             await message.answer(msg, reply_markup=get_main_menu())
             user_states.pop(user_id, None)
-        except ValueError:
-            await message.answer("❌ لطفاً یک عدد صحیح برای تعداد ماه‌ها وارد کنید.", reply_markup=get_back_menu())
+        except ValueError: await message.answer("❌ لطفاً یک عدد صحیح وارد کنید.", reply_markup=get_back_menu())
 
     elif current_state == "waiting_for_city":
         await message.answer(f"⏳ در حال دریافت آب‌وهوای {text}...")
-        weather_info = await asyncio.to_thread(get_weather, text)
-        await message.answer(weather_info, reply_markup=get_main_menu())
+        await message.answer(await asyncio.to_thread(get_weather, text), reply_markup=get_main_menu())
         user_states.pop(user_id, None)
         
     elif text == "🚀 استارت / منوی اصلی" or text == "/start":
         await command_start_handler(message)
-        
-    elif text == "💱 قیمت ارزها":
-        await message.answer(gen_fiat_msg())
-        
-    elif text == "🌕 قیمت طلا و سکه":
-        await message.answer(gen_gold_msg())
-        
-    elif text == "🪙 قیمت ارز دیجیتال":
-        await message.answer(gen_crypto_msg())
-        
-    elif text == "💵 مقایسه قیمت تتر":
-        await message.answer(gen_usdt_msg())
-
+    elif text == "💱 قیمت ارزها": await message.answer(gen_fiat_msg())
+    elif text == "🌕 قیمت طلا و سکه": await message.answer(gen_gold_msg())
+    elif text == "🪙 قیمت ارز دیجیتال": await message.answer(gen_crypto_msg())
+    elif text == "💵 مقایسه قیمت تتر": await message.answer(gen_usdt_msg())
     elif text == "🔍 پلاک‌خوان":
-        await message.answer(
-            "🔍 **پلاک‌خوان هوشمند**\n\n"
-            "می‌توانید یکی از این دو کار را انجام دهید:\n\n"
-            "1️⃣ **دو رقم سمت راست پلاک** را وارد کنید (مثلاً: `33`)\n"
-            "2️⃣ **نام شهر یا استان** را وارد کنید (مثلاً: `شیراز` یا `فارس`)\n\n"
-            "👇 انتخاب با شماست:",
-            reply_markup=get_back_menu()
-        )
+        await message.answer("🔍 **پلاک‌خوان**\n\nدو رقم پلاک (مثلاً 33) یا نام شهر (مثلاً شیراز) را وارد کنید:", reply_markup=get_back_menu())
         user_states[user_id] = "waiting_for_plate_query"
 
     elif text == "🧮 ماشین‌حساب طلا":
-        g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "در دسترس نیست"
-        g24 = f"{PRICE_CACHE['gold_24_num']:,}" if PRICE_CACHE['gold_24_num'] > 0 else "در دسترس نیست"
-        
-        msg = f"🧮 **ماشین‌حساب طلا**\n\n"
-        msg += f"💡 برای اطلاع شما، قیمت روز:\n"
-        msg += f"🥇 ۱۸ عیار: `{g18}` تومان\n"
-        msg += f"🥇 ۲۴ عیار: `{g24}` تومان\n\n"
-        msg += f"👇 حالا **قیمت هر گرم** طلایی که می‌خواهید بخرید را به تومان وارد کنید (مثلاً: 25300000):"
-        
+        g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "ناموجود"
+        g24 = f"{PRICE_CACHE['gold_24_num']:,}" if PRICE_CACHE['gold_24_num'] > 0 else "ناموجود"
+        msg = f"🧮 **ماشین‌حساب طلا**\n\n💡 قیمت روز:\n🥇 ۱۸ عیار: `{g18}`\n🥇 ۲۴ عیار: `{g24}`\n\n👇 **قیمت هر گرم** مد نظر خود را وارد کنید:"
         await message.answer(msg, reply_markup=get_back_menu())
         user_states[user_id] = "gold_waiting_price"
         
     elif text == "💸 ماشین‌حساب اقساط":
-        await message.answer("💸 لطفاً **مبلغ کل وام** را به تومان وارد کنید:", reply_markup=get_back_menu())
+        await message.answer("💸 **مبلغ کل وام** را وارد کنید:", reply_markup=get_back_menu())
         user_states[user_id] = "loan_waiting_amount"
-
     elif text == "🌤 وضعیت آب‌وهوا":
-        await message.answer("🌤 لطفاً نام شهر خود را وارد کنید (مثلاً: تهران):", reply_markup=get_back_menu())
+        await message.answer("🌤 نام شهر خود را وارد کنید:", reply_markup=get_back_menu())
         user_states[user_id] = "waiting_for_city"
-
     elif text == "🤖 چت با هوش مصنوعی":
-        await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
-
+        await message.answer("🤖 سوال خود را بپرسید:")
     elif text in ["💱 مبدل هوشمند ارز", "🚨 آلارم قیمتی"]:
-        await message.answer(f"⏳ بخش {text} در حال توسعه است و به زودی به ربات اضافه می‌شود.")
-
+        await message.answer(f"⏳ بخش {text} در حال توسعه است.")
     else:
         await message.answer("⏳ در حال پردازش...")
-        res = await asyncio.to_thread(get_ai_response, text)
-        await message.answer(res)
+        await message.answer(await asyncio.to_thread(get_ai_response, text))
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())
     asyncio.create_task(update_cache_task())
     asyncio.create_task(update_plate_data_task())
+    asyncio.create_task(channel_scheduler(bot))
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

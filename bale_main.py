@@ -22,10 +22,8 @@ ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
-# 👇 آدرس فایل آنلاین کدهای پلاک خودت 👇
 PLATE_DATA_URL = "https://raw.githubusercontent.com/mostafatavakoli544-del/diginavasan-bot/refs/heads/main/plates.json"
 
-# دیتای پیش‌فرض کامل (کد ← شهر)
 DEFAULT_PLATE_DATA = {
     "11": "تهران", "22": "تهران", "33": "تهران", "44": "تهران", "55": "تهران", "66": "تهران", "77": "تهران", "88": "تهران", "99": "تهران",
     "10": "تهران", "20": "تهران", "30": "تهران", "40": "تهران", "50": "تهران", "60": "تهران", "70": "تهران", "80": "تهران", "90": "تهران",
@@ -48,14 +46,12 @@ DEFAULT_PLATE_DATA = {
     "86": "سمنان", "96": "سمنان", "87": "زنجان", "97": "زنجان", "91": "اردبیل", "98": "ایلام"
 }
 CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
-
-# 👇 دیکشنری معکوس: شهر/استان ← لیست کدها (برای جستجوی سریع) 👇
 CITY_TO_CODES = {}
+
 def rebuild_city_index():
     global CITY_TO_CODES
     CITY_TO_CODES = {}
     for code, city_info in CURRENT_PLATE_DATA.items():
-        # برای شهرهای مشترک مثل "البرز (کرج) / تهران"، هم "البرز" و هم "تهران" را ثبت میکنیم
         parts = city_info.replace("(", "").replace(")", "").replace("/", " ").split()
         for part in parts:
             part = part.strip()
@@ -64,14 +60,11 @@ def rebuild_city_index():
                     CITY_TO_CODES[part] = []
                 if code not in CITY_TO_CODES[part]:
                     CITY_TO_CODES[part].append(code)
-    # مرتب‌سازی کدها برای نمایش زیبا
     for city in CITY_TO_CODES:
         CITY_TO_CODES[city].sort(key=lambda x: int(x))
 
-# ساخت اولیه ایندکس
 rebuild_city_index()
 
-# کش سراسری
 PRICE_CACHE = {
     "fiat": "", "gold": "", "crypto": "", "usdt": "",
     "gold_18_num": 0, "gold_24_num": 0, "last_update": "در حال دریافت..."
@@ -93,7 +86,7 @@ def fetch_plate_data_from_url():
         if res.status_code == 200:
             new_data = res.json()
             CURRENT_PLATE_DATA.update(new_data)
-            rebuild_city_index()  # بعد از آپدیت، ایندکس معکوس را دوباره میسازیم
+            rebuild_city_index() 
             logging.info("Plate data updated successfully from URL.")
     except Exception as e:
         logging.error(f"Failed to fetch plate data: {e}")
@@ -101,11 +94,8 @@ def fetch_plate_data_from_url():
 async def update_plate_data_task():
     while True:
         await asyncio.to_thread(fetch_plate_data_from_url)
-        await asyncio.sleep(86400) # هر ۲۴ ساعت یکبار
+        await asyncio.sleep(86400)
 
-# ==========================================
-# توابع قیمت (بدون تغییر)
-# ==========================================
 def get_nerkh_price(key):
     try:
         response = requests.get("https://nerkh.jahankhahan.shop/data/live.json", timeout=15)
@@ -119,7 +109,12 @@ def get_nerkh_price_safe(keys_list):
     for key in keys_list:
         price = get_nerkh_price(key)
         if price > 0: return f"{price:,.0f}"
-    return "0"
+    return "ناموجود"
+
+def format_price(price_str):
+    if price_str == "ناموجود":
+        return price_str
+    return f"`{price_str}` تومان"
 
 def get_multi_exchange_usdt_prices():
     results = {}
@@ -197,9 +192,6 @@ def get_weather(city):
     except Exception:
         return "❌ خطا در دریافت اطلاعات آب‌وهوا."
 
-# ==========================================
-# ساخت پیام‌ها
-# ==========================================
 def gen_fiat_msg(): return PRICE_CACHE["fiat"]
 def gen_gold_msg(): return PRICE_CACHE["gold"]
 def gen_crypto_msg(): return PRICE_CACHE["crypto"]
@@ -212,33 +204,39 @@ async def update_cache_task():
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             time_str = now.strftime('%H:%M')
             
+            # 👇 لیست ارزها (ین حذف شد و ۶ ارز جدید اضافه شد) 👇
             PRICE_CACHE["fiat"] = await asyncio.to_thread(lambda: (
                 f"💱 **قیمت لحظه‌ای ارزها**\n⏰ `{time_str}`\n\n"
-                f"💵 دلار = `{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n"
-                f"💶 یورو = `{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n"
-                f"💷 پوند = `{get_nerkh_price_safe(['pound', 'gbp'])}` تومان\n"
-                f"🇦🇪 درهم = `{get_nerkh_price_safe(['aed'])}` تومان\n"
-                f"🇹🇷 لیر = `{get_nerkh_price_safe(['lira'])}` تومان\n"
-                f"🇨🇳 یوان = `{get_nerkh_price_safe(['yuan', 'cny'])}` تومان\n"
-                f"🇨🇦 کانادا = `{get_nerkh_price_safe(['cad'])}` تومان\n"
-                f"🇦🇺 استرالیا = `{get_nerkh_price_safe(['aud'])}` تومان\n"
-                f"🇯🇵 ین ژاپن = `{get_nerkh_price_safe(['jpy'])}` تومان\n"
-                f"🇷🇺 روبل = `{get_nerkh_price_safe(['rub'])}` تومان"
+                f"💵 دلار = {format_price(get_nerkh_price_safe(['dollar', 'usd']))}\n"
+                f"💶 یورو = {format_price(get_nerkh_price_safe(['euro', 'eur']))}\n"
+                f"💷 پوند = {format_price(get_nerkh_price_safe(['pound', 'gbp']))}\n"
+                f"🇦🇪 درهم = {format_price(get_nerkh_price_safe(['aed']))}\n"
+                f"🇹🇷 لیر = {format_price(get_nerkh_price_safe(['lira', 'try']))}\n"
+                f"🇨🇳 یوان = {format_price(get_nerkh_price_safe(['yuan', 'cny']))}\n"
+                f"🇨🇦 کانادا = {format_price(get_nerkh_price_safe(['cad']))}\n"
+                f"🇦🇺 استرالیا = {format_price(get_nerkh_price_safe(['aud']))}\n"
+                f"🇨🇭 فرانک سوئیس = {format_price(get_nerkh_price_safe(['chf']))}\n"
+                f"🇸🇦 ریال عربستان = {format_price(get_nerkh_price_safe(['sar']))}\n"
+                f"🇶🇦 ریال قطر = {format_price(get_nerkh_price_safe(['qar']))}\n"
+                f"🇰🇼 دینار کویت = {format_price(get_nerkh_price_safe(['kwd']))}\n"
+                f"🇮🇶 دینار عراق = {format_price(get_nerkh_price_safe(['iqd']))}\n"
+                f"🇦🇫 افغانی = {format_price(get_nerkh_price_safe(['afn']))}\n"
+                f"🇷🇺 روبل = {format_price(get_nerkh_price_safe(['rub']))}"
             ))
 
             gold_18_str = get_nerkh_price_safe(['gold'])
             gold_24_str = get_nerkh_price_safe(['gold24'])
-            PRICE_CACHE["gold_18_num"] = int(gold_18_str.replace(',', '')) if gold_18_str != "0" else 0
-            PRICE_CACHE["gold_24_num"] = int(gold_24_str.replace(',', '')) if gold_24_str != "0" else 0
+            PRICE_CACHE["gold_18_num"] = int(gold_18_str.replace(',', '')) if gold_18_str != "ناموجود" else 0
+            PRICE_CACHE["gold_24_num"] = int(gold_24_str.replace(',', '')) if gold_24_str != "ناموجود" else 0
 
             PRICE_CACHE["gold"] = await asyncio.to_thread(lambda: (
                 f"🌕 **قیمت لحظه‌ای طلا و سکه**\n⏰ `{time_str}`\n\n"
-                f"🥇 طلا ۱۸ عیار = `{gold_18_str}` تومان\n"
-                f"🥇 طلا ۲۴ عیار = `{gold_24_str}` تومان\n"
-                f"🪙 سکه امامی = `{get_nerkh_price_safe(['coin'])}` تومان\n"
-                f"🪙 سکه بهار = `{get_nerkh_price_safe(['bahar'])}` تومان\n"
-                f"🪙 نیم سکه = `{get_nerkh_price_safe(['half'])}` تومان\n"
-                f"🪙 ربع سکه = `{get_nerkh_price_safe(['quarter'])}` تومان"
+                f"🥇 طلا ۱۸ عیار = {format_price(gold_18_str)}\n"
+                f"🥇 طلا ۲۴ عیار = {format_price(gold_24_str)}\n"
+                f"🪙 سکه امامی = {format_price(get_nerkh_price_safe(['coin']))}\n"
+                f"🪙 سکه بهار = {format_price(get_nerkh_price_safe(['bahar']))}\n"
+                f"🪙 نیم سکه = {format_price(get_nerkh_price_safe(['half']))}\n"
+                f"🪙 ربع سکه = {format_price(get_nerkh_price_safe(['quarter']))}"
             ))
 
             crypto = await asyncio.to_thread(get_crypto_prices_toman)
@@ -268,13 +266,8 @@ async def update_cache_task():
             logging.error(f"Cache update error: {e}")
         await asyncio.sleep(30)
 
-# ==========================================
-# 👇 پلاک‌خوان دوطرفه (کد ← شهر) و (شهر ← کد) 👇
-# ==========================================
 async def check_plate(query):
     query = query.strip()
-    
-    # حالت ۱: جستجوی مستقیم (کاربر یک کد دو رقمی وارد کرده)
     if query.isdigit() and len(query) == 2:
         if query in CURRENT_PLATE_DATA:
             province = CURRENT_PLATE_DATA[query]
@@ -283,16 +276,12 @@ async def check_plate(query):
             return f"🔍 **نتیجه:**\n\nکد `{query}` مربوط به **{province}** است."
         else:
             return f"❌ کد پلاک `{query}` معتبر نیست."
-    
-    # حالت ۲: جستجوی معکوس (کاربر نام شهر یا استان را وارد کرده)
     else:
-        # جستجوی دقیق در دیکشنری معکوس
         if query in CITY_TO_CODES:
             codes = CITY_TO_CODES[query]
             code_list = "، ".join(codes)
             return f"🔍 **نتیجه:**\n\nشهر/استان **{query}** دارای کدهای پلاک زیر است:\n\n`{code_list}`"
         
-        # اگر پیدا نشد، یک جستجوی جزئی انجام بده (مثلاً کاربر "کرج" را وارد کرده باشد)
         found_match = False
         for city_name, codes in CITY_TO_CODES.items():
             if query in city_name or city_name in query:
@@ -301,9 +290,6 @@ async def check_plate(query):
         
         return f"❌ متاسفانه برای **{query}** کد پلاکی یافت نشد.\n\n💡 لطفاً نام استان یا شهرستان را به درستی وارد کنید (مثلاً: تهران، شیراز، اصفهان)."
 
-# ==========================================
-# کیبوردها
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
@@ -339,13 +325,10 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
-    # ------------------ پلاک‌خوان دوطرفه ------------------
     if current_state == "waiting_for_plate_query":
         result = await check_plate(text)
         await message.answer(result, reply_markup=get_back_menu())
-        # وضعیت را پاک نمی‌کنیم تا کاربر بتواند جستجوی دیگری انجام دهد
 
-    # ------------------ ماشین‌حساب طلا ------------------
     elif current_state == "gold_waiting_price":
         try:
             gold_price = float(text.replace(',', ''))
@@ -415,7 +398,6 @@ async def handle_message(message: Message) -> None:
         except ValueError:
             await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
 
-    # ------------------ ماشین‌حساب اقساط (وام) ------------------
     elif current_state == "loan_waiting_amount":
         try:
             amount = float(text.replace(',', ''))
@@ -466,14 +448,12 @@ async def handle_message(message: Message) -> None:
         except ValueError:
             await message.answer("❌ لطفاً یک عدد صحیح برای تعداد ماه‌ها وارد کنید.", reply_markup=get_back_menu())
 
-    # ------------------ آب‌وهوا ------------------
     elif current_state == "waiting_for_city":
         await message.answer(f"⏳ در حال دریافت آب‌وهوای {text}...")
         weather_info = await asyncio.to_thread(get_weather, text)
         await message.answer(weather_info, reply_markup=get_main_menu())
         user_states.pop(user_id, None)
         
-    # ------------------ منوی اصلی ------------------
     elif text == "🚀 استارت / منوی اصلی" or text == "/start":
         await command_start_handler(message)
         
@@ -534,10 +514,8 @@ async def handle_message(message: Message) -> None:
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())
-    
     asyncio.create_task(update_cache_task())
     asyncio.create_task(update_plate_data_task())
-    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import json
 from datetime import datetime, timedelta
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
+from baleio.enums import ChatType
 from baleio.filters import CommandStart
 from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
@@ -49,7 +50,6 @@ DEFAULT_PLATE_DATA = {
 CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
 CITY_TO_CODES = {}
 
-# فوتر ثابت برای تمام پیام‌های کانال
 CHANNEL_FOOTER = "\n\n────────────\n🤖 [ورود به ربات دیجی نوسان](https://ble.ir/diginavasan_bot) | 📢 [کانال دیجی نوسان](https://ble.ir/diginavasan)"
 
 def rebuild_city_index():
@@ -83,9 +83,6 @@ def get_dates_info():
     now = datetime.now(pytz.timezone('Asia/Tehran'))
     return now.strftime('%H:%M'), now.hour
 
-# ==========================================
-# توابع دریافت اطلاعات
-# ==========================================
 def fetch_plate_data_from_url():
     global CURRENT_PLATE_DATA
     try:
@@ -195,9 +192,6 @@ def get_weather(city):
         return "❌ شهر مورد نظر پیدا نشد."
     except Exception: return "❌ خطا در دریافت اطلاعات آب‌وهوا."
 
-# ==========================================
-# ساخت پیام‌های کش ربات
-# ==========================================
 def gen_fiat_msg(): return PRICE_CACHE["fiat"]
 def gen_gold_msg(): return PRICE_CACHE["gold"]
 def gen_crypto_msg(): return PRICE_CACHE["crypto"]
@@ -271,9 +265,6 @@ async def update_cache_task():
             logging.error(f"Cache update error: {e}")
         await asyncio.sleep(30)
 
-# ==========================================
-# زمان‌بند کانال و پیام‌های اختصاصی
-# ==========================================
 async def fetch_kala_msg():
     today = jdatetime.date.today()
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -334,12 +325,10 @@ async def channel_scheduler(bot: Bot):
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             hour, minute = now.hour, now.minute
             
-            # بررسی اینکه آیا در این دقیقه پیامی فرستاده شده یا نه
             if minute != last_sent_minute and 8 <= hour < 20:
                 current_time = f"{hour:02d}:{minute:02d}"
                 msg_to_send = None
 
-                # پیام‌های خاص در ساعت‌های مشخص
                 if current_time == "08:00":
                     msg_to_send = "🌅 **بسم الله الرحمن الرحیم**\n\nامیدوارم روز خوب و پر از موفقیت رو آغاز کنید. ☀️\nفرصت‌ها منتظر نمی‌مانند؛ آغاز نرخ‌دهی بازار! 🚀💰"
                 elif current_time == "20:00":
@@ -350,8 +339,6 @@ async def channel_scheduler(bot: Bot):
                 elif current_time == "13:00":
                     kala_text = await fetch_kala_msg()
                     msg_to_send = kala_text + CHANNEL_FOOTER
-                
-                # چرخه ۱۵ دقیقه‌ای برای بقیه پیام‌ها
                 elif minute == 15:
                     msg_to_send = gen_fiat_msg() + CHANNEL_FOOTER
                 elif minute == 30:
@@ -371,9 +358,6 @@ async def channel_scheduler(bot: Bot):
         
         await asyncio.sleep(15)
 
-# ==========================================
-# پلاک‌خوان
-# ==========================================
 async def check_plate(query):
     query = query.strip()
     if query.isdigit() and len(query) == 2:
@@ -390,9 +374,6 @@ async def check_plate(query):
                 return f"🔍 **نتیجه:**\n\nشهر/استان **{city_name}** (نزدیک به جستجوی شما) دارای کدهای پلاک زیر است:\n\n`{', '.join(codes)}`"
         return f"❌ متاسفانه برای **{query}** کد پلاکی یافت نشد."
 
-# ==========================================
-# منو ربات
-# ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
@@ -412,11 +393,19 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
+    # 👇 جلوگیری از پاسخ ربات در کانال‌ها و گروه‌ها 👇
+    if message.chat.type != ChatType.PRIVATE:
+        return
+        
     user_states.pop(message.from_user.id, None)
     await message.answer("سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:", reply_markup=get_main_menu())
 
 @dp.message()
 async def handle_message(message: Message) -> None:
+    # 👇 جلوگیری از پاسخ ربات در کانال‌ها و گروه‌ها 👇
+    if message.chat.type != ChatType.PRIVATE:
+        return
+
     text = message.text.strip() if message.text else ""
     user_id = message.from_user.id
     current_state = user_states.get(user_id)

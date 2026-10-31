@@ -6,6 +6,7 @@ import http.server
 import socketserver
 import pytz
 import asyncio
+import math
 from datetime import datetime
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
@@ -21,9 +22,6 @@ ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
-UPSTASH_URL = os.environ.get("UPSTASH_REDIS_REST_URL")
-UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-
 # کش سراسری برای جلوگیری از قفل شدن ربات و افزایش سرعت
 PRICE_CACHE = {
     "fiat": "",
@@ -34,6 +32,9 @@ PRICE_CACHE = {
     "last_update": "در حال دریافت..."
 }
 
+# دیکشنری برای نگه داشتن وضعیت مکالمه کاربران
+user_states = {}
+
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
@@ -43,52 +44,7 @@ def get_dates_info():
     return now.strftime('%H:%M'), now.hour
 
 # ==========================================
-# توابع دیتابیس Upstash (با REST API)
-# ==========================================
-def upstash_get(key):
-    if not UPSTASH_URL or not UPSTASH_TOKEN: return None
-    try:
-        res = requests.get(f"{UPSTASH_URL}/get/{key}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=5)
-        if res.status_code == 200:
-            return res.json().get("result")
-    except Exception: pass
-    return None
-
-def upstash_incr(key):
-    if not UPSTASH_URL or not UPSTASH_TOKEN: return 0
-    try:
-        res = requests.get(f"{UPSTASH_URL}/incr/{key}", headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"}, timeout=5)
-        if res.status_code == 200:
-            return res.json().get("result")
-    except Exception: pass
-    return 0
-
-def check_quota(user_id, feature):
-    if not UPSTASH_URL or not UPSTASH_TOKEN: return True 
-    key = f"quota:{user_id}:{feature}"
-    count = upstash_get(key)
-    if count is None: count = 0
-    if int(count) < 3:
-        upstash_incr(key)
-        return True
-    return False
-
-# ==========================================
-# بررسی عضویت در کانال (با مدیریت خطا)
-# ==========================================
-async def check_channel_membership(bot: Bot, user_id: int) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        if member.status in ["creator", "administrator", "member"]:
-            return True
-        return False
-    except Exception as e:
-        logging.error(f"Error checking channel membership: {e}")
-        # اگر خطا داد (مثلاً ربات ادمین نیست)، به عنوان یک حالت نامشخص رفتار میکنیم
-        return None
-
-# ==========================================
-# توابع دریافت اطلاعات (همه Async-safe شده‌اند)
+# توابع دریافت اطلاعات
 # ==========================================
 def get_nerkh_price(key):
     try:
@@ -165,26 +121,33 @@ def get_ai_response(prompt):
         else: return "خطایی در ارتباط با هوش مصنوعی رخ داد."
     except Exception: return "خطای اتصال به هوش مصنوعی."
 
+def get_weather(city):
+    try:
+        url = f"https://wttr.in/{city}?format=j1"
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            current = data['current_condition'][0]
+            temp = current['temp_C']
+            desc = current['lang_fa'][0]['value'] if 'lang_fa' in current else current['weatherDesc'][0]['value']
+            humidity = current['humidity']
+            now = datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')
+            return f"🌤 **وضعیت آب‌وهوای {city}**\n\n🌡 دما: {temp} درجه سانتی‌گراد\n☁️ وضعیت: {desc}\n💧 رطوبت: {humidity}%\n⏰ آخرین به‌روزرسانی: `{now}`"
+        return "❌ شهر مورد نظر پیدا نشد."
+    except Exception:
+        return "❌ خطا در دریافت اطلاعات آب‌وهوا."
+
 # ==========================================
 # ساخت پیام‌ها (با استفاده از کش)
 # ==========================================
-def gen_fiat_msg():
-    return PRICE_CACHE["fiat"]
-
-def gen_gold_msg():
-    return PRICE_CACHE["gold"]
-
-def gen_crypto_msg():
-    return PRICE_CACHE["crypto"]
-
-def gen_usdt_msg():
-    return PRICE_CACHE["usdt"]
-
-def gen_bourse_msg():
-    return PRICE_CACHE["bourse"]
+def gen_fiat_msg(): return PRICE_CACHE["fiat"]
+def gen_gold_msg(): return PRICE_CACHE["gold"]
+def gen_crypto_msg(): return PRICE_CACHE["crypto"]
+def gen_usdt_msg(): return PRICE_CACHE["usdt"]
+def gen_bourse_msg(): return PRICE_CACHE["bourse"]
 
 # ==========================================
-# تسک پس‌زمینه برای آپدیت کش هر ۳۰ ثانیه (اصلاح‌شده با asyncio.to_thread)
+# تسک پس‌زمینه برای آپدیت کش هر ۳۰ ثانیه
 # ==========================================
 async def update_cache_task():
     global PRICE_CACHE
@@ -193,8 +156,7 @@ async def update_cache_task():
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             time_str = now.strftime('%H:%M')
             
-            # --- 1. آپدیت ارزها (Non-blocking) ---
-            fiat_msg = await asyncio.to_thread(lambda: (
+            PRICE_CACHE["fiat"] = await asyncio.to_thread(lambda: (
                 f"💱 **قیمت لحظه‌ای ارزها**\n⏰ `{time_str}`\n\n"
                 f"💵 دلار = `{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n"
                 f"💶 یورو = `{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n"
@@ -202,10 +164,8 @@ async def update_cache_task():
                 f"🇦🇪 درهم = `{get_nerkh_price_safe(['aed'])}` تومان\n"
                 f"🇹🇷 لیر = `{get_nerkh_price_safe(['lira'])}` تومان"
             ))
-            PRICE_CACHE["fiat"] = fiat_msg
 
-            # --- 2. آپدیت طلا (Non-blocking) ---
-            gold_msg = await asyncio.to_thread(lambda: (
+            PRICE_CACHE["gold"] = await asyncio.to_thread(lambda: (
                 f"🌕 **قیمت لحظه‌ای طلا و سکه**\n⏰ `{time_str}`\n\n"
                 f"🥇 طلا ۱۸ عیار = `{get_nerkh_price_safe(['gold'])}` تومان\n"
                 f"🥇 طلا ۲۴ عیار = `{get_nerkh_price_safe(['gold24'])}` تومان\n"
@@ -214,9 +174,7 @@ async def update_cache_task():
                 f"🪙 نیم سکه = `{get_nerkh_price_safe(['half'])}` تومان\n"
                 f"🪙 ربع سکه = `{get_nerkh_price_safe(['quarter'])}` تومان"
             ))
-            PRICE_CACHE["gold"] = gold_msg
 
-            # --- 3. آپدیت کریپتو (Non-blocking) ---
             crypto = await asyncio.to_thread(get_crypto_prices_toman)
             crypto_names = {"BTC": "بیت‌کوین", "ETH": "اتریوم", "BNB": "بایننس کوین", "TRX": "ترون", "SOL": "سولانا", "DOGE": "دوج کوین", "TON": "تون کوین"}
             crypto_lines = []
@@ -225,10 +183,8 @@ async def update_cache_task():
                     fa_name = crypto_names.get(sym, sym)
                     emoji = "🟢" if sym in ["BTC", "ETH"] else "🔹"
                     crypto_lines.append(f"{emoji} **{fa_name} ({sym})**: `{prc}` تومان")
-            crypto_msg = f"🪙 **قیمت لحظه‌ای ارز دیجیتال**\n⏰ `{time_str}`\n\n" + "\n".join(crypto_lines)
-            PRICE_CACHE["crypto"] = crypto_msg
+            PRICE_CACHE["crypto"] = f"🪙 **قیمت لحظه‌ای ارز دیجیتال**\n⏰ `{time_str}`\n\n" + "\n".join(crypto_lines)
 
-            # --- 4. آپدیت تتر (Non-blocking) ---
             usdt_prices = await asyncio.to_thread(get_multi_exchange_usdt_prices)
             usdt_lines = []
             if usdt_prices:
@@ -239,30 +195,25 @@ async def update_cache_task():
                 if len(sorted_prices) > 1:
                     diff = sorted_prices[-1][1] - sorted_prices[0][1]
                     usdt_lines.append(f"\n📊 اختلاف: `{diff:,}` تومان")
-            usdt_msg = f"💵 **مقایسه قیمت تتر (USDT)**\n⏰ `{time_str}`\n\n" + "\n".join(usdt_lines)
-            PRICE_CACHE["usdt"] = usdt_msg
+            PRICE_CACHE["usdt"] = f"💵 **مقایسه قیمت تتر (USDT)**\n⏰ `{time_str}`\n\n" + "\n".join(usdt_lines)
 
-            # --- 5. آپدیت بورس (Non-blocking) ---
             try:
                 url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY.strip()}&type=1"
                 res = await asyncio.to_thread(requests.get, url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
                 if res.status_code == 200:
                     data = res.json()
-                    bourse_msg = (
+                    PRICE_CACHE["bourse"] = (
                         f"📈 **وضعیت شاخص‌های بورس تهران**\n⏰ `{time_str}`\n\n"
                         f"🔹 **شاخص کل:** `{data.get('index', 0):,.0f}`\n"
                         f"⚖️ **شاخص هم‌وزن:** `{data.get('index_equalWeight', 0):,.0f}`\n"
                         f"🔴 وضعیت بازار: `{data.get('state', 'نامشخص')}`\n"
                     )
-                    PRICE_CACHE["bourse"] = bourse_msg
             except Exception: pass
 
             PRICE_CACHE["last_update"] = time_str
             logging.info(f"Cache updated at {time_str}")
-
         except Exception as e:
             logging.error(f"Cache update error: {e}")
-        
         await asyncio.sleep(30)
 
 # ==========================================
@@ -290,93 +241,176 @@ async def command_start_handler(message: Message) -> None:
 async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
     user_id = message.from_user.id
+    
+    current_state = user_states.get(user_id)
 
-    if text == "🚀 استارت / منوی اصلی" or text == "/start":
+    # ------------------ ماشین‌حساب طلا (مرحله به مرحله) ------------------
+    if current_state == "gold_waiting_weight":
+        try:
+            weight = float(text)
+            if weight <= 0: raise ValueError
+            user_states[user_id] = {"state": "gold_waiting_wage", "weight": weight}
+            await message.answer("🛠 درصد اجرت ساخت را وارد کنید (مثلاً 7 برای ۷٪):")
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.")
+            
+    elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_wage":
+        try:
+            wage_pct = float(text)
+            if wage_pct < 0: raise ValueError
+            current_state["wage_pct"] = wage_pct
+            current_state["state"] = "gold_waiting_profit"
+            await message.answer("🏪 درصد سود فروشنده را وارد کنید (مثلاً 7 برای ۷٪):")
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.")
+
+    elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_profit":
+        try:
+            profit_pct = float(text)
+            if profit_pct < 0: raise ValueError
+            current_state["profit_pct"] = profit_pct
+            current_state["state"] = "gold_waiting_tax"
+            await message.answer("📄 درصد مالیات بر ارزش افزوده را وارد کنید (مثلاً 9 برای ۹٪):")
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.")
+
+    elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_tax":
+        try:
+            tax_pct = float(text)
+            if tax_pct < 0: raise ValueError
+            
+            weight = current_state["weight"]
+            wage_pct = current_state["wage_pct"]
+            profit_pct = current_state["profit_pct"]
+            
+            gold_18_price_str = get_nerkh_price_safe(['gold'])
+            gold_18_price = int(gold_18_price_str.replace(',', ''))
+            
+            if gold_18_price == 0:
+                await message.answer("❌ متاسفانه قیمت لحظه‌ای طلا در دسترس نیست.")
+                del user_states[user_id]
+                return
+
+            raw_price = weight * gold_18_price
+            wage = raw_price * (wage_pct / 100)
+            profit = raw_price * (profit_pct / 100)
+            tax = (raw_price + wage + profit) * (tax_pct / 100)
+            
+            total_price = raw_price + wage + profit + tax
+
+            msg = f"🧮 **نتیجه محاسبه طلا (۱۸ عیار)**\n\n"
+            msg += f"⚖️ وزن: `{weight}` گرم\n"
+            msg += f"💰 قیمت خام طلا: `{raw_price:,.0f}` تومان\n"
+            msg += f"🛠 اجرت ساخت ({wage_pct}٪): `{wage:,.0f}` تومان\n"
+            msg += f"🏪 سود فروشنده ({profit_pct}٪): `{profit:,.0f}` تومان\n"
+            msg += f"📄 مالیات ({tax_pct}٪): `{tax:,.0f}` تومان\n\n"
+            msg += f"✅ **مبلغ نهایی خرید: `{total_price:,.0f}` تومان**"
+            
+            await message.answer(msg)
+            del user_states[user_id] 
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.")
+
+    # ------------------ ماشین‌حساب اقساط (وام) ------------------
+    elif current_state == "loan_waiting_amount":
+        try:
+            amount = float(text)
+            if amount <= 0: raise ValueError
+            user_states[user_id] = {"state": "loan_waiting_interest", "amount": amount}
+            await message.answer("📈 نرخ سود سالانه را وارد کنید (اگر بدون سود است، عدد 0 را بفرستید):")
+        except ValueError:
+            await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.")
+
+    elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_interest":
+        try:
+            interest = float(text)
+            if interest < 0: raise ValueError
+            current_state["interest"] = interest
+            current_state["state"] = "loan_waiting_months"
+            await message.answer("⏳ تعداد ماه‌های بازپرداخت را وارد کنید (مثلاً 12):")
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای نرخ سود وارد کنید.")
+
+    elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_months":
+        try:
+            months = int(text)
+            if months <= 0: raise ValueError
+            
+            amount = current_state["amount"]
+            annual_interest = current_state["interest"]
+            
+            if annual_interest == 0:
+                monthly_payment = amount / months
+                total_repayment = amount
+                total_interest = 0
+            else:
+                monthly_rate = (annual_interest / 100) / 12
+                # فرمول استاندارد Annuity
+                monthly_payment = amount * (monthly_rate * (1 + monthly_rate)**months) / ((1 + monthly_rate)**months - 1)
+                total_repayment = monthly_payment * months
+                total_interest = total_repayment - amount
+
+            msg = f"💸 **نتیجه محاسبه وام**\n\n"
+            msg += f"💵 مبلغ وام: `{amount:,.0f}` تومان\n"
+            msg += f"📈 نرخ سود سالانه: `{annual_interest}٪`\n"
+            msg += f"⏳ مدت بازپرداخت: `{months}` ماه\n\n"
+            msg += f"💳 **قسط ماهانه: `{monthly_payment:,.0f}` تومان**\n"
+            msg += f"💰 مجموع بازپرداخت: `{total_repayment:,.0f}` تومان\n"
+            msg += f"📉 مجموع سود پرداختی: `{total_interest:,.0f}` تومان"
+
+            await message.answer(msg)
+            del user_states[user_id]
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد صحیح برای تعداد ماه‌ها وارد کنید.")
+
+    # ------------------ آب‌وهوا ------------------
+    elif current_state == "waiting_for_city":
+        await message.answer(f"⏳ در حال دریافت آب‌وهوای {text}...")
+        weather_info = await asyncio.to_thread(get_weather, text)
+        await message.answer(weather_info)
+        del user_states[user_id]
+        
+    # ------------------ منوی اصلی ------------------
+    elif text == "🚀 استارت / منوی اصلی" or text == "/start":
+        if user_id in user_states: del user_states[user_id]
         await command_start_handler(message)
         
     elif text == "💱 قیمت ارزها":
-        if check_quota(user_id, "fiat"):
-            await message.answer(gen_fiat_msg())
-        else:
-            # بررسی عضویت در کانال (با مدیریت خطا)
-            is_member = await check_channel_membership(message.bot, user_id)
-            if is_member is True:
-                await message.answer(gen_fiat_msg())
-            elif is_member is False:
-                await message.answer("⚠️ سهمیه رایگان شما به پایان رسیده است. لطفاً ابتدا در کانال ما عضو شوید.")
-            else:
-                await message.answer("⚠️ امکان بررسی عضویت شما در کانال وجود ندارد. لطفاً بعداً تلاش کنید.")
-
+        await message.answer(gen_fiat_msg())
+        
     elif text == "🌕 قیمت طلا و سکه":
-        if check_quota(user_id, "gold"):
-            await message.answer(gen_gold_msg())
-        else:
-            is_member = await check_channel_membership(message.bot, user_id)
-            if is_member is True:
-                await message.answer(gen_gold_msg())
-            elif is_member is False:
-                await message.answer("⚠️ سهمیه رایگان شما به پایان رسیده است. لطفاً ابتدا در کانال ما عضو شوید.")
-            else:
-                await message.answer("⚠️ امکان بررسی عضویت شما در کانال وجود ندارد. لطفاً بعداً تلاش کنید.")
-
+        await message.answer(gen_gold_msg())
+        
     elif text == "🪙 قیمت ارز دیجیتال":
-        if check_quota(user_id, "crypto"):
-            await message.answer(gen_crypto_msg())
-            await asyncio.sleep(1)
-            await message.answer(gen_usdt_msg())
-        else:
-            is_member = await check_channel_membership(message.bot, user_id)
-            if is_member is True:
-                await message.answer(gen_crypto_msg())
-                await asyncio.sleep(1)
-                await message.answer(gen_usdt_msg())
-            elif is_member is False:
-                await message.answer("⚠️ سهمیه رایگان شما به پایان رسیده است. لطفاً ابتدا در کانال ما عضو شوید.")
-            else:
-                await message.answer("⚠️ امکان بررسی عضویت شما در کانال وجود ندارد. لطفاً بعداً تلاش کنید.")
-
+        await message.answer(gen_crypto_msg())
+        await asyncio.sleep(1)
+        await message.answer(gen_usdt_msg())
+        
     elif text == "📈 شاخص بورس":
-        if check_quota(user_id, "bourse"):
-            await message.answer(gen_bourse_msg())
-        else:
-            is_member = await check_channel_membership(message.bot, user_id)
-            if is_member is True:
-                await message.answer(gen_bourse_msg())
-            elif is_member is False:
-                await message.answer("⚠️ سهمیه رایگان شما به پایان رسیده است. لطفاً ابتدا در کانال ما عضو شوید.")
-            else:
-                await message.answer("⚠️ امکان بررسی عضویت شما در کانال وجود ندارد. لطفاً بعداً تلاش کنید.")
+        await message.answer(gen_bourse_msg())
+
+    elif text == "🧮 ماشین‌حساب طلا":
+        await message.answer("🧮 لطفاً وزن طلای خود را به **گرم** وارد کنید (مثلاً: 5):")
+        user_states[user_id] = "gold_waiting_weight"
+        
+    elif text == "💸 ماشین‌حساب اقساط":
+        await message.answer("💸 لطفاً **مبلغ کل وام** را به تومان وارد کنید:")
+        user_states[user_id] = "loan_waiting_amount"
+
+    elif text == "🌤 وضعیت آب‌وهوا":
+        await message.answer("🌤 لطفاً نام شهر خود را وارد کنید (مثلاً: تهران):")
+        user_states[user_id] = "waiting_for_city"
 
     elif text == "🤖 چت با هوش مصنوعی":
-        if check_quota(user_id, "ai"):
-            await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
-        else:
-            is_member = await check_channel_membership(message.bot, user_id)
-            if is_member is True:
-                await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
-            elif is_member is False:
-                await message.answer("⚠️ سهمیه رایگان شما برای بخش هوش مصنوعی به پایان رسیده است. لطفاً ابتدا در کانال ما عضو شوید.")
-            else:
-                await message.answer("⚠️ امکان بررسی عضویت شما در کانال وجود ندارد. لطفاً بعداً تلاش کنید.")
+        await message.answer("🤖 لطفاً سوال خود را بپرسید تا هوش مصنوعی پاسخ دهد:")
 
-    elif text in ["🧮 ماشین‌حساب طلا", "💸 ماشین‌حساب اقساط", "💱 مبدل هوشمند ارز", "🌤 وضعیت آب‌وهوا", "🚨 آلارم قیمتی"]:
+    elif text in ["💱 مبدل هوشمند ارز", "🚨 آلارم قیمتی"]:
         await message.answer(f"⏳ بخش {text} در حال توسعه است و به زودی به ربات اضافه می‌شود.")
 
     else:
-        if check_quota(user_id, "ai"):
-            await message.answer("⏳ در حال پردازش...")
-            res = await asyncio.to_thread(get_ai_response, text)
-            await message.answer(res)
-        else:
-            is_member = await check_channel_membership(message.bot, user_id)
-            if is_member is True:
-                await message.answer("⏳ در حال پردازش...")
-                res = await asyncio.to_thread(get_ai_response, text)
-                await message.answer(res)
-            elif is_member is False:
-                await message.answer("⚠️ سهمیه رایگان شما برای بخش هوش مصنوعی به پایان رسیده است. لطفاً ابتدا در کانال ما عضو شوید.")
-            else:
-                await message.answer("⚠️ امکان بررسی عضویت شما در کانال وجود ندارد. لطفاً بعداً تلاش کنید.")
+        await message.answer("⏳ در حال پردازش...")
+        res = await asyncio.to_thread(get_ai_response, text)
+        await message.answer(res)
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())

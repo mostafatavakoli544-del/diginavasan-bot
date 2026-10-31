@@ -6,12 +6,19 @@ import http.server
 import socketserver
 import pytz
 import asyncio
-import math
+import json
 from datetime import datetime
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.filters import CommandStart
 from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
+
+# تلاش برای استفاده از کتابخانه
+try:
+    from persian_tools.plate import province_by_code
+except ImportError:
+    province_by_code = None
+    logging.warning("persian-tools not installed. Plate reader will use fallback data.")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -22,18 +29,31 @@ ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
-# کش سراسری برای جلوگیری از قفل شدن ربات و افزایش سرعت
-PRICE_CACHE = {
-    "fiat": "",
-    "gold": "",
-    "crypto": "",
-    "usdt": "",
-    "gold_18_num": 0,
-    "gold_24_num": 0,
-    "last_update": "در حال دریافت..."
-}
+# 👇 لینک اختصاصی خودت 👇
+PLATE_DATA_URL = "https://raw.githubusercontent.com/mostafatavakoli544-del/diginavasan-bot/refs/heads/main/plates.json"
 
-# دیکشنری برای نگه داشتن وضعیت مکالمه کاربران
+# دیتای پیش‌فرض (اگر اینترنت قطع بود یا آپدیت نشد)
+DEFAULT_PLATE_DATA = {
+    "10": "تهران", "11": "تهران", "20": "تهران", "21": "البرز (کرج) / تهران", "22": "تهران",
+    "33": "تهران", "38": "البرز (کرج) / تهران", "44": "تهران / کیش", "55": "تهران", "66": "تهران", "68": "البرز (کرج) / تهران", "77": "تهران", "78": "البرز (کرج) / تهران", "88": "تهران", "99": "تهران",
+    "12": "خراسان رضوی", "32": "خراسان رضوی", "36": "خراسان رضوی", "42": "خراسان رضوی", "74": "خراسان رضوی",
+    "13": "اصفهان", "23": "اصفهان", "43": "اصفهان", "53": "اصفهان", "67": "اصفهان",
+    "63": "فارس", "73": "فارس", "83": "فارس", "93": "فارس",
+    "14": "خوزستان", "24": "خوزستان", "34": "خوزستان",
+    "15": "آذربایجان شرقی", "25": "آذربایجان شرقی", "35": "آذربایجان شرقی",
+    "17": "آذربایجان غربی", "27": "آذربایجان غربی", "37": "آذربایجان غربی",
+    "62": "مازندران", "72": "مازندران", "82": "مازندران", "92": "مازندران",
+    "46": "گیلان", "56": "گیلان", "76": "گیلان",
+    "45": "کرمان", "65": "کرمان", "75": "کرمان",
+    "59": "گلستان", "69": "گلستان"
+}
+CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
+
+# کش سراسری
+PRICE_CACHE = {
+    "fiat": "", "gold": "", "crypto": "", "usdt": "",
+    "gold_18_num": 0, "gold_24_num": 0, "last_update": "در حال دریافت..."
+}
 user_states = {}
 
 def run_dummy_server():
@@ -44,8 +64,24 @@ def get_dates_info():
     now = datetime.now(pytz.timezone('Asia/Tehran'))
     return now.strftime('%H:%M'), now.hour
 
+def fetch_plate_data_from_url():
+    global CURRENT_PLATE_DATA
+    try:
+        res = requests.get(PLATE_DATA_URL, timeout=10)
+        if res.status_code == 200:
+            new_data = res.json()
+            CURRENT_PLATE_DATA.update(new_data)
+            logging.info("Plate data updated successfully from URL.")
+    except Exception as e:
+        logging.error(f"Failed to fetch plate data: {e}")
+
+async def update_plate_data_task():
+    while True:
+        await asyncio.to_thread(fetch_plate_data_from_url)
+        await asyncio.sleep(86400) # هر ۲۴ ساعت یکبار
+
 # ==========================================
-# توابع دریافت اطلاعات
+# توابع قیمت
 # ==========================================
 def get_nerkh_price(key):
     try:
@@ -146,9 +182,6 @@ def gen_gold_msg(): return PRICE_CACHE["gold"]
 def gen_crypto_msg(): return PRICE_CACHE["crypto"]
 def gen_usdt_msg(): return PRICE_CACHE["usdt"]
 
-# ==========================================
-# تسک پس‌زمینه برای آپدیت کش هر ۳۰ ثانیه
-# ==========================================
 async def update_cache_task():
     global PRICE_CACHE
     while True:
@@ -156,7 +189,6 @@ async def update_cache_task():
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             time_str = now.strftime('%H:%M')
             
-            # آپدیت ارزها (لیست کامل و پرطرفدار)
             PRICE_CACHE["fiat"] = await asyncio.to_thread(lambda: (
                 f"💱 **قیمت لحظه‌ای ارزها**\n⏰ `{time_str}`\n\n"
                 f"💵 دلار = `{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n"
@@ -173,7 +205,6 @@ async def update_cache_task():
 
             gold_18_str = get_nerkh_price_safe(['gold'])
             gold_24_str = get_nerkh_price_safe(['gold24'])
-            
             PRICE_CACHE["gold_18_num"] = int(gold_18_str.replace(',', '')) if gold_18_str != "0" else 0
             PRICE_CACHE["gold_24_num"] = int(gold_24_str.replace(',', '')) if gold_24_str != "0" else 0
 
@@ -210,10 +241,34 @@ async def update_cache_task():
             PRICE_CACHE["usdt"] = f"💵 **مقایسه قیمت تتر (USDT)**\n⏰ `{time_str}`\n\n" + "\n".join(usdt_lines)
 
             PRICE_CACHE["last_update"] = time_str
-            logging.info(f"Cache updated at {time_str}")
         except Exception as e:
             logging.error(f"Cache update error: {e}")
         await asyncio.sleep(30)
+
+# ==========================================
+# پلاک‌خوان
+# ==========================================
+async def check_plate(plate_code):
+    if province_by_code:
+        try:
+            result = province_by_code(plate_code)
+            if result:
+                if isinstance(result, list):
+                    return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مشترک بین **{' و '.join(result)}** است."
+                return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مربوط به **{result}** است."
+            else:
+                # اگر کتابخانه پیدا نکرد، برو سراغ لیست آنلاین
+                pass
+        except Exception:
+            pass 
+
+    if plate_code in CURRENT_PLATE_DATA:
+        province = CURRENT_PLATE_DATA[plate_code]
+        if "/" in province:
+            return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مشترک بین **{province}** است."
+        return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مربوط به **{province}** است."
+    
+    return f"❌ کد پلاک `{plate_code}` معتبر نیست."
 
 # ==========================================
 # کیبوردها
@@ -224,8 +279,9 @@ def get_main_menu():
         [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
         [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="💵 مقایسه قیمت تتر")],
         [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
-        [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
-        [KeyboardButton(text="🚨 آلارم قیمتی"), KeyboardButton(text="🤖 چت با هوش مصنوعی")]
+        [KeyboardButton(text="🔍 پلاک‌خوان"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
+        [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🤖 چت با هوش مصنوعی")],
+        [KeyboardButton(text="🚨 آلارم قیمتی")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -245,18 +301,25 @@ async def command_start_handler(message: Message) -> None:
 async def handle_message(message: Message) -> None:
     text = message.text.strip() if message.text else ""
     user_id = message.from_user.id
-    
     current_state = user_states.get(user_id)
 
-    # اگر کاربر دکمه بازگشت را زد
     if text == "🔙 بازگشت به منوی اصلی":
-        if user_id in user_states:
-            del user_states[user_id]
+        user_states.pop(user_id, None)
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
+    # ------------------ پلاک‌خوان ------------------
+    if current_state == "waiting_for_plate_code":
+        plate_code = text.strip()
+        if len(plate_code) == 2 and plate_code.isdigit():
+            result = await check_plate(plate_code)
+            await message.answer(result, reply_markup=get_main_menu())
+            user_states.pop(user_id, None)
+        else:
+            await message.answer("❌ لطفاً فقط **دو رقم** سمت راست پلاک را وارد کنید (مثلاً 33):", reply_markup=get_back_menu())
+
     # ------------------ ماشین‌حساب طلا ------------------
-    if current_state == "gold_waiting_price":
+    elif current_state == "gold_waiting_price":
         try:
             gold_price = float(text.replace(',', ''))
             if gold_price <= 0: raise ValueError
@@ -321,7 +384,7 @@ async def handle_message(message: Message) -> None:
             msg += f"✅ **مبلغ نهایی خرید: `{total_price:,.0f}` تومان**"
             
             await message.answer(msg, reply_markup=get_main_menu())
-            del user_states[user_id] 
+            user_states.pop(user_id, None) 
         except ValueError:
             await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
 
@@ -372,7 +435,7 @@ async def handle_message(message: Message) -> None:
             msg += f"📉 مجموع سود پرداختی: `{total_interest:,.0f}` تومان"
 
             await message.answer(msg, reply_markup=get_main_menu())
-            del user_states[user_id]
+            user_states.pop(user_id, None)
         except ValueError:
             await message.answer("❌ لطفاً یک عدد صحیح برای تعداد ماه‌ها وارد کنید.", reply_markup=get_back_menu())
 
@@ -381,7 +444,7 @@ async def handle_message(message: Message) -> None:
         await message.answer(f"⏳ در حال دریافت آب‌وهوای {text}...")
         weather_info = await asyncio.to_thread(get_weather, text)
         await message.answer(weather_info, reply_markup=get_main_menu())
-        del user_states[user_id]
+        user_states.pop(user_id, None)
         
     # ------------------ منوی اصلی ------------------
     elif text == "🚀 استارت / منوی اصلی" or text == "/start":
@@ -398,6 +461,10 @@ async def handle_message(message: Message) -> None:
         
     elif text == "💵 مقایسه قیمت تتر":
         await message.answer(gen_usdt_msg())
+
+    elif text == "🔍 پلاک‌خوان":
+        await message.answer("🔍 **پلاک‌خوان**\n\nلطفاً **دو رقم سمت راست** پلاک را وارد کنید (مثلاً: 33):", reply_markup=get_back_menu())
+        user_states[user_id] = "waiting_for_plate_code"
 
     elif text == "🧮 ماشین‌حساب طلا":
         g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "در دسترس نیست"
@@ -433,7 +500,11 @@ async def handle_message(message: Message) -> None:
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())
+    
+    # 👇 اجرای تسک‌های پس‌زمینه 👇
     asyncio.create_task(update_cache_task())
+    asyncio.create_task(update_plate_data_task())
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

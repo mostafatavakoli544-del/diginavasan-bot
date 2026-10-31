@@ -28,7 +28,8 @@ PRICE_CACHE = {
     "gold": "",
     "crypto": "",
     "usdt": "",
-    "bourse": "",
+    "gold_18_num": 0,
+    "gold_24_num": 0,
     "last_update": "در حال دریافت..."
 }
 
@@ -138,13 +139,12 @@ def get_weather(city):
         return "❌ خطا در دریافت اطلاعات آب‌وهوا."
 
 # ==========================================
-# ساخت پیام‌ها (با استفاده از کش)
+# ساخت پیام‌ها
 # ==========================================
 def gen_fiat_msg(): return PRICE_CACHE["fiat"]
 def gen_gold_msg(): return PRICE_CACHE["gold"]
 def gen_crypto_msg(): return PRICE_CACHE["crypto"]
 def gen_usdt_msg(): return PRICE_CACHE["usdt"]
-def gen_bourse_msg(): return PRICE_CACHE["bourse"]
 
 # ==========================================
 # تسک پس‌زمینه برای آپدیت کش هر ۳۰ ثانیه
@@ -156,19 +156,31 @@ async def update_cache_task():
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             time_str = now.strftime('%H:%M')
             
+            # آپدیت ارزها (لیست کامل و پرطرفدار)
             PRICE_CACHE["fiat"] = await asyncio.to_thread(lambda: (
                 f"💱 **قیمت لحظه‌ای ارزها**\n⏰ `{time_str}`\n\n"
                 f"💵 دلار = `{get_nerkh_price_safe(['dollar', 'usd'])}` تومان\n"
                 f"💶 یورو = `{get_nerkh_price_safe(['euro', 'eur'])}` تومان\n"
                 f"💷 پوند = `{get_nerkh_price_safe(['pound', 'gbp'])}` تومان\n"
                 f"🇦🇪 درهم = `{get_nerkh_price_safe(['aed'])}` تومان\n"
-                f"🇹🇷 لیر = `{get_nerkh_price_safe(['lira'])}` تومان"
+                f"🇹🇷 لیر = `{get_nerkh_price_safe(['lira'])}` تومان\n"
+                f"🇨🇳 یوان = `{get_nerkh_price_safe(['yuan', 'cny'])}` تومان\n"
+                f"🇨🇦 کانادا = `{get_nerkh_price_safe(['cad'])}` تومان\n"
+                f"🇦🇺 استرالیا = `{get_nerkh_price_safe(['aud'])}` تومان\n"
+                f"🇯🇵 ین ژاپن = `{get_nerkh_price_safe(['jpy'])}` تومان\n"
+                f"🇷🇺 روبل = `{get_nerkh_price_safe(['rub'])}` تومان"
             ))
+
+            gold_18_str = get_nerkh_price_safe(['gold'])
+            gold_24_str = get_nerkh_price_safe(['gold24'])
+            
+            PRICE_CACHE["gold_18_num"] = int(gold_18_str.replace(',', '')) if gold_18_str != "0" else 0
+            PRICE_CACHE["gold_24_num"] = int(gold_24_str.replace(',', '')) if gold_24_str != "0" else 0
 
             PRICE_CACHE["gold"] = await asyncio.to_thread(lambda: (
                 f"🌕 **قیمت لحظه‌ای طلا و سکه**\n⏰ `{time_str}`\n\n"
-                f"🥇 طلا ۱۸ عیار = `{get_nerkh_price_safe(['gold'])}` تومان\n"
-                f"🥇 طلا ۲۴ عیار = `{get_nerkh_price_safe(['gold24'])}` تومان\n"
+                f"🥇 طلا ۱۸ عیار = `{gold_18_str}` تومان\n"
+                f"🥇 طلا ۲۴ عیار = `{gold_24_str}` تومان\n"
                 f"🪙 سکه امامی = `{get_nerkh_price_safe(['coin'])}` تومان\n"
                 f"🪙 سکه بهار = `{get_nerkh_price_safe(['bahar'])}` تومان\n"
                 f"🪙 نیم سکه = `{get_nerkh_price_safe(['half'])}` تومان\n"
@@ -197,19 +209,6 @@ async def update_cache_task():
                     usdt_lines.append(f"\n📊 اختلاف: `{diff:,}` تومان")
             PRICE_CACHE["usdt"] = f"💵 **مقایسه قیمت تتر (USDT)**\n⏰ `{time_str}`\n\n" + "\n".join(usdt_lines)
 
-            try:
-                url = f"https://Api.Brsapi.ir/Tsetmc/Index.php?key={BRS_API_KEY.strip()}&type=1"
-                res = await asyncio.to_thread(requests.get, url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
-                if res.status_code == 200:
-                    data = res.json()
-                    PRICE_CACHE["bourse"] = (
-                        f"📈 **وضعیت شاخص‌های بورس تهران**\n⏰ `{time_str}`\n\n"
-                        f"🔹 **شاخص کل:** `{data.get('index', 0):,.0f}`\n"
-                        f"⚖️ **شاخص هم‌وزن:** `{data.get('index_equalWeight', 0):,.0f}`\n"
-                        f"🔴 وضعیت بازار: `{data.get('state', 'نامشخص')}`\n"
-                    )
-            except Exception: pass
-
             PRICE_CACHE["last_update"] = time_str
             logging.info(f"Cache updated at {time_str}")
         except Exception as e:
@@ -217,23 +216,28 @@ async def update_cache_task():
         await asyncio.sleep(30)
 
 # ==========================================
-# منو و ربات
+# کیبوردها
 # ==========================================
 def get_main_menu():
     keyboard = [
         [KeyboardButton(text="🚀 استارت / منوی اصلی")],
         [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
-        [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="📈 شاخص بورس")],
+        [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="💵 مقایسه قیمت تتر")],
         [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
         [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
         [KeyboardButton(text="🚨 آلارم قیمتی"), KeyboardButton(text="🤖 چت با هوش مصنوعی")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
+def get_back_menu():
+    keyboard = [[KeyboardButton(text="🔙 بازگشت به منوی اصلی")]]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
+    user_states.pop(message.from_user.id, None)
     welcome = "سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:"
     await message.answer(welcome, reply_markup=get_main_menu())
 
@@ -244,25 +248,42 @@ async def handle_message(message: Message) -> None:
     
     current_state = user_states.get(user_id)
 
-    # ------------------ ماشین‌حساب طلا (مرحله به مرحله) ------------------
-    if current_state == "gold_waiting_weight":
+    # اگر کاربر دکمه بازگشت را زد
+    if text == "🔙 بازگشت به منوی اصلی":
+        if user_id in user_states:
+            del user_states[user_id]
+        await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
+        return
+
+    # ------------------ ماشین‌حساب طلا ------------------
+    if current_state == "gold_waiting_price":
         try:
-            weight = float(text)
-            if weight <= 0: raise ValueError
-            user_states[user_id] = {"state": "gold_waiting_wage", "weight": weight}
-            await message.answer("🛠 درصد اجرت ساخت را وارد کنید (مثلاً 7 برای ۷٪):")
+            gold_price = float(text.replace(',', ''))
+            if gold_price <= 0: raise ValueError
+            user_states[user_id] = {"state": "gold_waiting_weight", "price": gold_price}
+            await message.answer("⚖️ حالا وزن طلا را به **گرم** وارد کنید (مثلاً: 5):", reply_markup=get_back_menu())
         except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.")
+            await message.answer("❌ لطفاً یک عدد معتبر برای قیمت وارد کنید.", reply_markup=get_back_menu())
             
+    elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_weight":
+        try:
+            weight = float(text.replace(',', ''))
+            if weight <= 0: raise ValueError
+            current_state["weight"] = weight
+            current_state["state"] = "gold_waiting_wage"
+            await message.answer("🛠 درصد اجرت ساخت را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.", reply_markup=get_back_menu())
+
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_wage":
         try:
             wage_pct = float(text)
             if wage_pct < 0: raise ValueError
             current_state["wage_pct"] = wage_pct
             current_state["state"] = "gold_waiting_profit"
-            await message.answer("🏪 درصد سود فروشنده را وارد کنید (مثلاً 7 برای ۷٪):")
+            await message.answer("🏪 درصد سود فروشنده را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
         except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.")
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_profit":
         try:
@@ -270,56 +291,49 @@ async def handle_message(message: Message) -> None:
             if profit_pct < 0: raise ValueError
             current_state["profit_pct"] = profit_pct
             current_state["state"] = "gold_waiting_tax"
-            await message.answer("📄 درصد مالیات بر ارزش افزوده را وارد کنید (مثلاً 9 برای ۹٪):")
+            await message.answer("📄 درصد مالیات بر ارزش افزوده را وارد کنید (معمولاً 9):", reply_markup=get_back_menu())
         except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.")
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_tax":
         try:
             tax_pct = float(text)
             if tax_pct < 0: raise ValueError
             
+            price = current_state["price"]
             weight = current_state["weight"]
             wage_pct = current_state["wage_pct"]
             profit_pct = current_state["profit_pct"]
             
-            gold_18_price_str = get_nerkh_price_safe(['gold'])
-            gold_18_price = int(gold_18_price_str.replace(',', ''))
-            
-            if gold_18_price == 0:
-                await message.answer("❌ متاسفانه قیمت لحظه‌ای طلا در دسترس نیست.")
-                del user_states[user_id]
-                return
-
-            raw_price = weight * gold_18_price
+            raw_price = weight * price
             wage = raw_price * (wage_pct / 100)
             profit = raw_price * (profit_pct / 100)
             tax = (raw_price + wage + profit) * (tax_pct / 100)
-            
             total_price = raw_price + wage + profit + tax
 
-            msg = f"🧮 **نتیجه محاسبه طلا (۱۸ عیار)**\n\n"
+            msg = f"🧮 **نتیجه محاسبه طلا**\n\n"
+            msg += f"💰 قیمت هر گرم: `{price:,.0f}` تومان\n"
             msg += f"⚖️ وزن: `{weight}` گرم\n"
-            msg += f"💰 قیمت خام طلا: `{raw_price:,.0f}` تومان\n"
+            msg += f"📦 قیمت خام: `{raw_price:,.0f}` تومان\n"
             msg += f"🛠 اجرت ساخت ({wage_pct}٪): `{wage:,.0f}` تومان\n"
             msg += f"🏪 سود فروشنده ({profit_pct}٪): `{profit:,.0f}` تومان\n"
             msg += f"📄 مالیات ({tax_pct}٪): `{tax:,.0f}` تومان\n\n"
             msg += f"✅ **مبلغ نهایی خرید: `{total_price:,.0f}` تومان**"
             
-            await message.answer(msg)
+            await message.answer(msg, reply_markup=get_main_menu())
             del user_states[user_id] 
         except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.")
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
 
     # ------------------ ماشین‌حساب اقساط (وام) ------------------
     elif current_state == "loan_waiting_amount":
         try:
-            amount = float(text)
+            amount = float(text.replace(',', ''))
             if amount <= 0: raise ValueError
             user_states[user_id] = {"state": "loan_waiting_interest", "amount": amount}
-            await message.answer("📈 نرخ سود سالانه را وارد کنید (اگر بدون سود است، عدد 0 را بفرستید):")
+            await message.answer("📈 نرخ سود سالانه را وارد کنید (اگر بدون سود است، عدد 0 را بفرستید):", reply_markup=get_back_menu())
         except ValueError:
-            await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.")
+            await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_interest":
         try:
@@ -327,9 +341,9 @@ async def handle_message(message: Message) -> None:
             if interest < 0: raise ValueError
             current_state["interest"] = interest
             current_state["state"] = "loan_waiting_months"
-            await message.answer("⏳ تعداد ماه‌های بازپرداخت را وارد کنید (مثلاً 12):")
+            await message.answer("⏳ تعداد ماه‌های بازپرداخت را وارد کنید (مثلاً 12):", reply_markup=get_back_menu())
         except ValueError:
-            await message.answer("❌ لطفاً یک عدد معتبر برای نرخ سود وارد کنید.")
+            await message.answer("❌ لطفاً یک عدد معتبر برای نرخ سود وارد کنید.", reply_markup=get_back_menu())
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_months":
         try:
@@ -345,7 +359,6 @@ async def handle_message(message: Message) -> None:
                 total_interest = 0
             else:
                 monthly_rate = (annual_interest / 100) / 12
-                # فرمول استاندارد Annuity
                 monthly_payment = amount * (monthly_rate * (1 + monthly_rate)**months) / ((1 + monthly_rate)**months - 1)
                 total_repayment = monthly_payment * months
                 total_interest = total_repayment - amount
@@ -358,21 +371,20 @@ async def handle_message(message: Message) -> None:
             msg += f"💰 مجموع بازپرداخت: `{total_repayment:,.0f}` تومان\n"
             msg += f"📉 مجموع سود پرداختی: `{total_interest:,.0f}` تومان"
 
-            await message.answer(msg)
+            await message.answer(msg, reply_markup=get_main_menu())
             del user_states[user_id]
         except ValueError:
-            await message.answer("❌ لطفاً یک عدد صحیح برای تعداد ماه‌ها وارد کنید.")
+            await message.answer("❌ لطفاً یک عدد صحیح برای تعداد ماه‌ها وارد کنید.", reply_markup=get_back_menu())
 
     # ------------------ آب‌وهوا ------------------
     elif current_state == "waiting_for_city":
         await message.answer(f"⏳ در حال دریافت آب‌وهوای {text}...")
         weather_info = await asyncio.to_thread(get_weather, text)
-        await message.answer(weather_info)
+        await message.answer(weather_info, reply_markup=get_main_menu())
         del user_states[user_id]
         
     # ------------------ منوی اصلی ------------------
     elif text == "🚀 استارت / منوی اصلی" or text == "/start":
-        if user_id in user_states: del user_states[user_id]
         await command_start_handler(message)
         
     elif text == "💱 قیمت ارزها":
@@ -383,22 +395,29 @@ async def handle_message(message: Message) -> None:
         
     elif text == "🪙 قیمت ارز دیجیتال":
         await message.answer(gen_crypto_msg())
-        await asyncio.sleep(1)
-        await message.answer(gen_usdt_msg())
         
-    elif text == "📈 شاخص بورس":
-        await message.answer(gen_bourse_msg())
+    elif text == "💵 مقایسه قیمت تتر":
+        await message.answer(gen_usdt_msg())
 
     elif text == "🧮 ماشین‌حساب طلا":
-        await message.answer("🧮 لطفاً وزن طلای خود را به **گرم** وارد کنید (مثلاً: 5):")
-        user_states[user_id] = "gold_waiting_weight"
+        g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "در دسترس نیست"
+        g24 = f"{PRICE_CACHE['gold_24_num']:,}" if PRICE_CACHE['gold_24_num'] > 0 else "در دسترس نیست"
+        
+        msg = f"🧮 **ماشین‌حساب طلا**\n\n"
+        msg += f"💡 برای اطلاع شما، قیمت روز:\n"
+        msg += f"🥇 ۱۸ عیار: `{g18}` تومان\n"
+        msg += f"🥇 ۲۴ عیار: `{g24}` تومان\n\n"
+        msg += f"👇 حالا **قیمت هر گرم** طلایی که می‌خواهید بخرید را به تومان وارد کنید (مثلاً: 25300000):"
+        
+        await message.answer(msg, reply_markup=get_back_menu())
+        user_states[user_id] = "gold_waiting_price"
         
     elif text == "💸 ماشین‌حساب اقساط":
-        await message.answer("💸 لطفاً **مبلغ کل وام** را به تومان وارد کنید:")
+        await message.answer("💸 لطفاً **مبلغ کل وام** را به تومان وارد کنید:", reply_markup=get_back_menu())
         user_states[user_id] = "loan_waiting_amount"
 
     elif text == "🌤 وضعیت آب‌وهوا":
-        await message.answer("🌤 لطفاً نام شهر خود را وارد کنید (مثلاً: تهران):")
+        await message.answer("🌤 لطفاً نام شهر خود را وارد کنید (مثلاً: تهران):", reply_markup=get_back_menu())
         user_states[user_id] = "waiting_for_city"
 
     elif text == "🤖 چت با هوش مصنوعی":

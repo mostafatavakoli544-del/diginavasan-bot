@@ -8,3 +8,4 @@ Pillow
 arabic-reshaper
 python-bidi
 baleio
+persian-tools

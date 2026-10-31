@@ -25,7 +25,7 @@ BRS_API_KEY = os.environ.get("BRS_API_KEY")
 # 👇 آدرس فایل آنلاین کدهای پلاک خودت 👇
 PLATE_DATA_URL = "https://raw.githubusercontent.com/mostafatavakoli544-del/diginavasan-bot/refs/heads/main/plates.json"
 
-# دیتای پیش‌فرض کامل (در صورت قطعی اینترنت)
+# دیتای پیش‌فرض کامل (کد ← شهر)
 DEFAULT_PLATE_DATA = {
     "11": "تهران", "22": "تهران", "33": "تهران", "44": "تهران", "55": "تهران", "66": "تهران", "77": "تهران", "88": "تهران", "99": "تهران",
     "10": "تهران", "20": "تهران", "30": "تهران", "40": "تهران", "50": "تهران", "60": "تهران", "70": "تهران", "80": "تهران", "90": "تهران",
@@ -49,6 +49,28 @@ DEFAULT_PLATE_DATA = {
 }
 CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
 
+# 👇 دیکشنری معکوس: شهر/استان ← لیست کدها (برای جستجوی سریع) 👇
+CITY_TO_CODES = {}
+def rebuild_city_index():
+    global CITY_TO_CODES
+    CITY_TO_CODES = {}
+    for code, city_info in CURRENT_PLATE_DATA.items():
+        # برای شهرهای مشترک مثل "البرز (کرج) / تهران"، هم "البرز" و هم "تهران" را ثبت میکنیم
+        parts = city_info.replace("(", "").replace(")", "").replace("/", " ").split()
+        for part in parts:
+            part = part.strip()
+            if part:
+                if part not in CITY_TO_CODES:
+                    CITY_TO_CODES[part] = []
+                if code not in CITY_TO_CODES[part]:
+                    CITY_TO_CODES[part].append(code)
+    # مرتب‌سازی کدها برای نمایش زیبا
+    for city in CITY_TO_CODES:
+        CITY_TO_CODES[city].sort(key=lambda x: int(x))
+
+# ساخت اولیه ایندکس
+rebuild_city_index()
+
 # کش سراسری
 PRICE_CACHE = {
     "fiat": "", "gold": "", "crypto": "", "usdt": "",
@@ -71,6 +93,7 @@ def fetch_plate_data_from_url():
         if res.status_code == 200:
             new_data = res.json()
             CURRENT_PLATE_DATA.update(new_data)
+            rebuild_city_index()  # بعد از آپدیت، ایندکس معکوس را دوباره میسازیم
             logging.info("Plate data updated successfully from URL.")
     except Exception as e:
         logging.error(f"Failed to fetch plate data: {e}")
@@ -81,7 +104,7 @@ async def update_plate_data_task():
         await asyncio.sleep(86400) # هر ۲۴ ساعت یکبار
 
 # ==========================================
-# توابع قیمت
+# توابع قیمت (بدون تغییر)
 # ==========================================
 def get_nerkh_price(key):
     try:
@@ -246,16 +269,37 @@ async def update_cache_task():
         await asyncio.sleep(30)
 
 # ==========================================
-# پلاک‌خوان (نسخه نهایی و بدون باگ)
+# 👇 پلاک‌خوان دوطرفه (کد ← شهر) و (شهر ← کد) 👇
 # ==========================================
-async def check_plate(plate_code):
-    if plate_code in CURRENT_PLATE_DATA:
-        province = CURRENT_PLATE_DATA[plate_code]
-        if "/" in province:
-            return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مشترک بین **{province}** است."
-        return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مربوط به **{province}** است."
+async def check_plate(query):
+    query = query.strip()
     
-    return f"❌ کد پلاک `{plate_code}` معتبر نیست."
+    # حالت ۱: جستجوی مستقیم (کاربر یک کد دو رقمی وارد کرده)
+    if query.isdigit() and len(query) == 2:
+        if query in CURRENT_PLATE_DATA:
+            province = CURRENT_PLATE_DATA[query]
+            if "/" in province:
+                return f"🔍 **نتیجه:**\n\nکد `{query}` مشترک بین **{province}** است."
+            return f"🔍 **نتیجه:**\n\nکد `{query}` مربوط به **{province}** است."
+        else:
+            return f"❌ کد پلاک `{query}` معتبر نیست."
+    
+    # حالت ۲: جستجوی معکوس (کاربر نام شهر یا استان را وارد کرده)
+    else:
+        # جستجوی دقیق در دیکشنری معکوس
+        if query in CITY_TO_CODES:
+            codes = CITY_TO_CODES[query]
+            code_list = "، ".join(codes)
+            return f"🔍 **نتیجه:**\n\nشهر/استان **{query}** دارای کدهای پلاک زیر است:\n\n`{code_list}`"
+        
+        # اگر پیدا نشد، یک جستجوی جزئی انجام بده (مثلاً کاربر "کرج" را وارد کرده باشد)
+        found_match = False
+        for city_name, codes in CITY_TO_CODES.items():
+            if query in city_name or city_name in query:
+                code_list = "، ".join(codes)
+                return f"🔍 **نتیجه:**\n\nشهر/استان **{city_name}** (نزدیک به جستجوی شما) دارای کدهای پلاک زیر است:\n\n`{code_list}`"
+        
+        return f"❌ متاسفانه برای **{query}** کد پلاکی یافت نشد.\n\n💡 لطفاً نام استان یا شهرستان را به درستی وارد کنید (مثلاً: تهران، شیراز، اصفهان)."
 
 # ==========================================
 # کیبوردها
@@ -295,15 +339,11 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
-    # ------------------ پلاک‌خوان ------------------
-    if current_state == "waiting_for_plate_code":
-        plate_code = text.strip()
-        if len(plate_code) == 2 and plate_code.isdigit():
-            result = await check_plate(plate_code)
-            await message.answer(result, reply_markup=get_back_menu()) # دکمه بازگشت حفظ می‌شود
-            # وضعیت را پاک نمی‌کنیم تا کاربر بتواند عدد دیگری را امتحان کند
-        else:
-            await message.answer("❌ لطفاً فقط **دو رقم** سمت راست پلاک را وارد کنید (مثلاً 33):", reply_markup=get_back_menu())
+    # ------------------ پلاک‌خوان دوطرفه ------------------
+    if current_state == "waiting_for_plate_query":
+        result = await check_plate(text)
+        await message.answer(result, reply_markup=get_back_menu())
+        # وضعیت را پاک نمی‌کنیم تا کاربر بتواند جستجوی دیگری انجام دهد
 
     # ------------------ ماشین‌حساب طلا ------------------
     elif current_state == "gold_waiting_price":
@@ -450,8 +490,15 @@ async def handle_message(message: Message) -> None:
         await message.answer(gen_usdt_msg())
 
     elif text == "🔍 پلاک‌خوان":
-        await message.answer("🔍 **پلاک‌خوان**\n\nلطفاً **دو رقم سمت راست** پلاک را وارد کنید (مثلاً: 33):", reply_markup=get_back_menu())
-        user_states[user_id] = "waiting_for_plate_code"
+        await message.answer(
+            "🔍 **پلاک‌خوان هوشمند**\n\n"
+            "می‌توانید یکی از این دو کار را انجام دهید:\n\n"
+            "1️⃣ **دو رقم سمت راست پلاک** را وارد کنید (مثلاً: `33`)\n"
+            "2️⃣ **نام شهر یا استان** را وارد کنید (مثلاً: `شیراز` یا `فارس`)\n\n"
+            "👇 انتخاب با شماست:",
+            reply_markup=get_back_menu()
+        )
+        user_states[user_id] = "waiting_for_plate_query"
 
     elif text == "🧮 ماشین‌حساب طلا":
         g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "در دسترس نیست"

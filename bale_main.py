@@ -13,13 +13,6 @@ from baleio.client.default import DefaultBotProperties
 from baleio.filters import CommandStart
 from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
-# تلاش برای استفاده از کتابخانه
-try:
-    from persian_tools.plate import province_by_code
-except ImportError:
-    province_by_code = None
-    logging.warning("persian-tools not installed. Plate reader will use fallback data.")
-
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 BALE_TOKEN = os.environ.get("BALE_TOKEN")
@@ -29,13 +22,14 @@ ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
-# 👇 لینک اختصاصی خودت 👇
+# 👇 آدرس فایل آنلاین کدهای پلاک خودت 👇
 PLATE_DATA_URL = "https://raw.githubusercontent.com/mostafatavakoli544-del/diginavasan-bot/refs/heads/main/plates.json"
 
-# دیتای پیش‌فرض (اگر اینترنت قطع بود یا آپدیت نشد)
+# دیتای پیش‌فرض کامل (در صورت قطعی اینترنت)
 DEFAULT_PLATE_DATA = {
-    "10": "تهران", "11": "تهران", "20": "تهران", "21": "البرز (کرج) / تهران", "22": "تهران",
-    "33": "تهران", "38": "البرز (کرج) / تهران", "44": "تهران / کیش", "55": "تهران", "66": "تهران", "68": "البرز (کرج) / تهران", "77": "تهران", "78": "البرز (کرج) / تهران", "88": "تهران", "99": "تهران",
+    "11": "تهران", "22": "تهران", "33": "تهران", "44": "تهران", "55": "تهران", "66": "تهران", "77": "تهران", "88": "تهران", "99": "تهران",
+    "10": "تهران", "20": "تهران", "30": "تهران", "40": "تهران", "50": "تهران", "60": "تهران", "70": "تهران", "80": "تهران", "90": "تهران",
+    "21": "البرز (کرج) / تهران", "38": "البرز (کرج) / تهران", "68": "البرز (کرج) / تهران", "78": "البرز (کرج) / تهران",
     "12": "خراسان رضوی", "32": "خراسان رضوی", "36": "خراسان رضوی", "42": "خراسان رضوی", "74": "خراسان رضوی",
     "13": "اصفهان", "23": "اصفهان", "43": "اصفهان", "53": "اصفهان", "67": "اصفهان",
     "63": "فارس", "73": "فارس", "83": "فارس", "93": "فارس",
@@ -45,7 +39,13 @@ DEFAULT_PLATE_DATA = {
     "62": "مازندران", "72": "مازندران", "82": "مازندران", "92": "مازندران",
     "46": "گیلان", "56": "گیلان", "76": "گیلان",
     "45": "کرمان", "65": "کرمان", "75": "کرمان",
-    "59": "گلستان", "69": "گلستان"
+    "59": "گلستان", "69": "گلستان", "79": "قزوین", "89": "قزوین",
+    "16": "قم", "18": "همدان", "28": "همدان", "19": "کرمانشاه", "29": "کرمانشاه",
+    "26": "خراسان شمالی", "31": "لرستان", "41": "لرستان", "47": "مرکزی", "57": "مرکزی",
+    "48": "بوشهر", "58": "بوشهر", "49": "کهگیلویه و بویراحمد", "51": "کردستان", "61": "کردستان",
+    "52": "خراسان جنوبی", "54": "یزد", "64": "یزد", "71": "چهارمحال و بختیاری", "81": "چهارمحال و بختیاری",
+    "84": "هرمزگان", "94": "هرمزگان", "85": "سیستان و بلوچستان", "95": "سیستان و بلوچستان",
+    "86": "سمنان", "96": "سمنان", "87": "زنجان", "97": "زنجان", "91": "اردبیل", "98": "ایلام"
 }
 CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
 
@@ -246,22 +246,9 @@ async def update_cache_task():
         await asyncio.sleep(30)
 
 # ==========================================
-# پلاک‌خوان
+# پلاک‌خوان (نسخه نهایی و بدون باگ)
 # ==========================================
 async def check_plate(plate_code):
-    if province_by_code:
-        try:
-            result = province_by_code(plate_code)
-            if result:
-                if isinstance(result, list):
-                    return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مشترک بین **{' و '.join(result)}** است."
-                return f"🔍 **نتیجه:**\n\nکد `{plate_code}` مربوط به **{result}** است."
-            else:
-                # اگر کتابخانه پیدا نکرد، برو سراغ لیست آنلاین
-                pass
-        except Exception:
-            pass 
-
     if plate_code in CURRENT_PLATE_DATA:
         province = CURRENT_PLATE_DATA[plate_code]
         if "/" in province:
@@ -313,8 +300,8 @@ async def handle_message(message: Message) -> None:
         plate_code = text.strip()
         if len(plate_code) == 2 and plate_code.isdigit():
             result = await check_plate(plate_code)
-            await message.answer(result, reply_markup=get_main_menu())
-            user_states.pop(user_id, None)
+            await message.answer(result, reply_markup=get_back_menu()) # دکمه بازگشت حفظ می‌شود
+            # وضعیت را پاک نمی‌کنیم تا کاربر بتواند عدد دیگری را امتحان کند
         else:
             await message.answer("❌ لطفاً فقط **دو رقم** سمت راست پلاک را وارد کنید (مثلاً 33):", reply_markup=get_back_menu())
 
@@ -501,7 +488,6 @@ async def handle_message(message: Message) -> None:
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())
     
-    # 👇 اجرای تسک‌های پس‌زمینه 👇
     asyncio.create_task(update_cache_task())
     asyncio.create_task(update_plate_data_task())
     

@@ -448,11 +448,12 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
+    # دستور تست اینفوگرافیک با متد صحیح send_photo
     if text == "/test_info":
         await message.answer("⏳ در حال ساخت اینفوگرافیک تستی...")
         try:
             img_bytes = generate_infographic(INFO_CACHE)
-            await message.answer_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک")
+            await message.send_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک")
         except Exception as e:
             await message.answer(f"❌ خطا: {str(e)}")
         return
@@ -589,7 +590,6 @@ async def handle_message(message: Message) -> None:
         await message.answer("⏳ در حال پردازش...")
         await message.answer(await asyncio.to_thread(get_ai_response, text), reply_markup=get_back_menu())
     else:
-        # اگر دکمه‌ای نبود و در استیت خاصی هم نبود، پیش‌فرض بفرست به هوش مصنوعی یا راهنمایی منو
         await message.answer("لطفاً یکی از گزینه‌های منو را انتخاب کنید یا برای چت با هوش مصنوعی، دکمه مربوطه را بزنید.", reply_markup=get_main_menu())
 
 async def main() -> None:

@@ -459,7 +459,7 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
-    # دستور تست اینفوگرافیک با متد صحیح answer_photo در کتابخانه بله
+    # دستور تست اینفوگرافیک با ارسال صحیح عکس
     if text == "/test_info":
         await message.answer("⏳ در حال ساخت اینفوگرافیک لاکچری تستی...")
         try:

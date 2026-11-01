@@ -53,7 +53,7 @@ def run_dummy_server():
     with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
 
 # ==========================================
-# توابع کمکی اینفوگرافیک
+# توابع کمکی و اینفوگرافیک لاکچری و مدرن
 # ==========================================
 def fa_text(text):
     if not text: return ""
@@ -72,62 +72,74 @@ def draw_rtl_text(draw, xy, text, font, fill, align="right"):
     else:
         draw.text(xy, text, font=font, fill=fill)
 
+def create_luxury_gradient_bg(width, height):
+    base = Image.new('RGB', (width, height), (12, 20, 36))
+    draw = ImageDraw.Draw(base)
+    for y in range(height):
+        r = int(12 + (22 - 12) * y / height)
+        g = int(20 + (34 - 20) * y / height)
+        b = int(36 + (58 - 36) * y / height)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    return base
+
 def generate_infographic(data):
     width, height = 1080, 1920
-    bg_color = (15, 25, 45)
-    card_bg = (28, 45, 75)
-    text_white = (255, 255, 255)
-    text_gold = (255, 215, 0)
-    
-    img = Image.new('RGB', (width, height), bg_color)
+    img = create_luxury_gradient_bg(width, height)
     draw = ImageDraw.Draw(img)
-    
+
     try:
-        font_large = ImageFont.truetype(FONT_PATH, 50)
-        font_medium = ImageFont.truetype(FONT_PATH, 35)
-        font_small = ImageFont.truetype(FONT_PATH, 28)
-        font_tiny = ImageFont.truetype(FONT_PATH, 22)
+        font_title = ImageFont.truetype(FONT_PATH, 55)
+        font_header = ImageFont.truetype(FONT_PATH, 36)
+        font_body = ImageFont.truetype(FONT_PATH, 30)
+        font_small = ImageFont.truetype(FONT_PATH, 24)
     except:
-        logging.error("Font not found!")
-        font_large = font_medium = font_small = font_tiny = ImageFont.load_default()
+        font_title = font_header = font_body = font_small = ImageFont.load_default()
 
-    draw_rtl_text(draw, (width - 50, 60), fa_text("خلاصه وضعیت بازار دیجی نوسان"), font_large, text_white)
+    # هدر لاکچری بالا
+    header_box = (50, 40, width - 50, 160)
+    draw.rounded_rectangle(header_box, radius=24, fill=(24, 38, 64), outline=(218, 165, 32), width=3)
+    draw_rtl_text(draw, (width - 80, 70), fa_text("✨ دیجی نوسان | خلاصه بازار"), font_title, (255, 215, 0))
     now_str = datetime.now(pytz.timezone('Asia/Tehran')).strftime("%Y/%m/%d - %H:%M")
-    draw_rtl_text(draw, (width - 50, 130), fa_text(now_str), font_small, (150, 150, 150))
-    draw.line((50, 180, width-50, 180), fill=(100, 100, 100), width=2)
+    draw_rtl_text(draw, (width - 80, 125), fa_text(now_str), font_small, (180, 190, 210))
 
-    y = 220
-    draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
-    draw_rtl_text(draw, (width-80, y+20), fa_text("طلا و سکه"), font_medium, text_gold)
-    draw_rtl_text(draw, (width-80, y+80), fa_text(f"طلای ۱۸ عیار: {format_num(data.get('gold_18', 0))} تومان"), font_small, text_white)
-    draw_rtl_text(draw, (width-80, y+130), fa_text(f"سکه امامی: {format_num(data.get('coin', 0))} تومان"), font_small, text_white)
+    # کارت‌های شیشه‌ای مدرن (ارزها، طلا و رمزارزها)
+    # ۱. کارت طلا و سکه (سمت بالا راست)
+    y1 = 200
+    draw.rounded_rectangle((50, y1, width - 50, y1 + 380), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
+    draw_rtl_text(draw, (width - 80, y1 + 25), fa_text("🌕 طلا و سکه"), font_header, (255, 215, 0))
+    draw.line((80, y1 + 80, width - 80, y1 + 80), fill=(45, 65, 100), width=2)
+    
+    draw_rtl_text(draw, (width - 80, y1 + 105), fa_text(f"طلای ۱۸ عیار:"), font_body, (180, 190, 210))
+    draw_rtl_text(draw, (width - 80, y1 + 155), fa_text(f"{format_num(data.get('gold_18', 0))} تومان"), font_body, (255, 255, 255))
+    
+    draw_rtl_text(draw, (width - 80, y1 + 225), fa_text(f"سکه امامی:"), font_body, (180, 190, 210))
+    draw_rtl_text(draw, (width - 80, y1 + 275), fa_text(f"{format_num(data.get('coin', 0))} تومان"), font_body, (255, 255, 255))
 
-    y = 480
-    draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
-    draw_rtl_text(draw, (width-80, y+20), fa_text("ارزهای خارجی"), font_medium, text_gold)
-    draw_rtl_text(draw, (width-80, y+80), fa_text(f"دلار: {format_num(data.get('dollar', 0))} تومان"), font_small, text_white)
-    draw_rtl_text(draw, (width-80, y+130), fa_text(f"یورو: {format_num(data.get('euro', 0))} تومان"), font_small, text_white)
+    # ۲. کارت ارزهای خارجی (وسط)
+    y2 = 610
+    draw.rounded_rectangle((50, y2, width - 50, y2 + 480), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
+    draw_rtl_text(draw, (width - 80, y2 + 25), fa_text("💱 ارزهای خارجی"), font_header, (255, 215, 0))
+    draw.line((80, y2 + 80, width - 80, y2 + 80), fill=(45, 65, 100), width=2)
 
-    y = 740
-    draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
-    draw_rtl_text(draw, (width-80, y+20), fa_text("رمزارزها"), font_medium, text_gold)
-    draw_rtl_text(draw, (width-80, y+80), fa_text(f"بیت‌کوین: {format_num(data.get('btc', 0))} تومان"), font_small, text_white)
-    draw_rtl_text(draw, (width-80, y+130), fa_text(f"اتریوم: {format_num(data.get('eth', 0))} تومان"), font_small, text_white)
+    draw_rtl_text(draw, (width - 80, y2 + 105), fa_text(f"دلار: {format_num(data.get('dollar', 0))} تومان"), font_body, (255, 255, 255))
+    draw_rtl_text(draw, (width - 80, y2 + 175), fa_text(f"یورو: {format_num(data.get('euro', 0))} تومان"), font_body, (255, 255, 255))
+    draw_rtl_text(draw, (width - 80, y2 + 245), fa_text(f"تتر (بهترین): {format_num(data.get('usdt_best', 0))} تومان"), font_body, (255, 255, 255))
+    draw_rtl_text(draw, (width - 80, y2 + 315), fa_text(f"نفت برنت: {data.get('oil_usd', 'N/A')} دلار"), font_body, (255, 255, 255))
+    draw_rtl_text(draw, (width - 80, y2 + 385), fa_text(f"نقره: {data.get('silver_usd', 'N/A')} دلار"), font_body, (255, 255, 255))
 
-    y = 1000
-    draw.rounded_rectangle((50, y, width-50, y+180), radius=20, fill=card_bg)
-    draw_rtl_text(draw, (width-80, y+20), fa_text("تتر (USDT)"), font_medium, text_gold)
-    draw_rtl_text(draw, (width-80, y+80), fa_text(f"بهترین قیمت: {format_num(data.get('usdt_best', 0))} تومان"), font_small, text_white)
+    # ۳. کارت رمزارزها (پایین)
+    y3 = 1120
+    draw.rounded_rectangle((50, y3, width - 50, y3 + 420), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
+    draw_rtl_text(draw, (width - 80, y3 + 25), fa_text("🪙 رمزارزهای برتر"), font_header, (255, 215, 0))
+    draw.line((80, y3 + 80, width - 80, y3 + 80), fill=(45, 65, 100), width=2)
 
-    y = 1220
-    draw.rounded_rectangle((50, y, width-50, y+180), radius=20, fill=card_bg)
-    draw_rtl_text(draw, (width-80, y+20), fa_text("نفت و نقره (دلاری)"), font_medium, text_gold)
-    draw_rtl_text(draw, (width-80, y+80), fa_text(f"نفت برنت: {data.get('oil_usd', 'N/A')} دلار"), font_small, text_white)
-    draw_rtl_text(draw, (width-80, y+130), fa_text(f"نقره: {data.get('silver_usd', 'N/A')} دلار"), font_small, text_white)
+    draw_rtl_text(draw, (width - 80, y3 + 115), fa_text(f"بیت‌کوین: {format_num(data.get('btc', 0))} تومان"), font_body, (255, 255, 255))
+    draw_rtl_text(draw, (width - 80, y3 + 205), fa_text(f"اتریوم: {format_num(data.get('eth', 0))} تومان"), font_body, (255, 255, 255))
 
-    draw.line((50, height-150, width-50, height-150), fill=(100, 100, 100), width=1)
-    draw_rtl_text(draw, (width-50, height-110), fa_text("امکانات: قیمت لحظه‌ای | ماشین‌حساب | هوش مصنوعی"), font_tiny, (150, 150, 150))
-    draw_rtl_text(draw, (width-50, height-70), fa_text("Digi Navasan"), font_small, text_gold)
+    # فوتر پایین تصویر
+    draw.line((80, height - 150, width - 80, height - 150), fill=(70, 95, 140), width=1)
+    draw_rtl_text(draw, (width - 50, height - 110), fa_text("قیمت لحظه‌ای | ماشین‌حساب | تحلیل هوشمند"), font_small, (160, 175, 200))
+    draw_rtl_text(draw, (width - 50, height - 70), fa_text("Digi Navasan Channel & Bot"), font_small, (255, 215, 0))
 
     bio = BytesIO()
     img.save(bio, format="PNG")
@@ -448,12 +460,12 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
-    # دستور تست اینفوگرافیک با متد صحیح send_photo
+    # دستور تست اینفوگرافیک با ظاهر لاکچری جدید
     if text == "/test_info":
-        await message.answer("⏳ در حال ساخت اینفوگرافیک تستی...")
+        await message.answer("⏳ در حال ساخت اینفوگرافیک لاکچری تستی...")
         try:
             img_bytes = generate_infographic(INFO_CACHE)
-            await message.send_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک")
+            await message.send_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک لاکچری")
         except Exception as e:
             await message.answer(f"❌ خطا: {str(e)}")
         return

@@ -73,7 +73,7 @@ def draw_rtl_text(draw, xy, text, font, fill, align="right"):
         draw.text(xy, text, font=font, fill=fill)
 
 def generate_infographic(data):
-    width, height = 1000, 1500
+    width, height = 1080, 1920
     bg_color = (15, 25, 45)
     card_bg = (28, 45, 75)
     text_white = (255, 255, 255)
@@ -91,43 +91,43 @@ def generate_infographic(data):
         logging.error("Font not found!")
         font_large = font_medium = font_small = font_tiny = ImageFont.load_default()
 
-    draw_rtl_text(draw, (width - 50, 50), fa_text("خلاصه وضعیت بازار"), font_large, text_white)
+    draw_rtl_text(draw, (width - 50, 60), fa_text("خلاصه وضعیت بازار دیجی نوسان"), font_large, text_white)
     now_str = datetime.now(pytz.timezone('Asia/Tehran')).strftime("%Y/%m/%d - %H:%M")
-    draw_rtl_text(draw, (width - 50, 110), fa_text(now_str), font_small, (150, 150, 150))
-    draw.line((50, 160, width-50, 160), fill=(100, 100, 100), width=2)
+    draw_rtl_text(draw, (width - 50, 130), fa_text(now_str), font_small, (150, 150, 150))
+    draw.line((50, 180, width-50, 180), fill=(100, 100, 100), width=2)
 
-    y = 200
+    y = 220
     draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("طلا و سکه"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"طلای ۱۸ عیار: {format_num(data.get('gold_18', 0))} تومان"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"سکه امامی: {format_num(data.get('coin', 0))} تومان"), font_small, text_white)
 
-    y = 450
+    y = 480
     draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("ارزهای خارجی"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"دلار: {format_num(data.get('dollar', 0))} تومان"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"یورو: {format_num(data.get('euro', 0))} تومان"), font_small, text_white)
 
-    y = 700
+    y = 740
     draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("رمزارزها"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"بیت‌کوین: {format_num(data.get('btc', 0))} تومان"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"اتریوم: {format_num(data.get('eth', 0))} تومان"), font_small, text_white)
 
-    y = 950
+    y = 1000
     draw.rounded_rectangle((50, y, width-50, y+180), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("تتر (USDT)"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"بهترین قیمت: {format_num(data.get('usdt_best', 0))} تومان"), font_small, text_white)
 
-    y = 1160
+    y = 1220
     draw.rounded_rectangle((50, y, width-50, y+180), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("نفت و نقره (دلاری)"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"نفت برنت: {data.get('oil_usd', 'N/A')} دلار"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"نقره: {data.get('silver_usd', 'N/A')} دلار"), font_small, text_white)
 
     draw.line((50, height-150, width-50, height-150), fill=(100, 100, 100), width=1)
-    draw_rtl_text(draw, (width-50, height-120), fa_text("امکانات: قیمت لحظه‌ای | ماشین‌حساب | هوش مصنوعی"), font_tiny, (150, 150, 150))
-    draw_rtl_text(draw, (width-50, height-80), fa_text("Digi Navasan"), font_small, text_gold)
+    draw_rtl_text(draw, (width-50, height-110), fa_text("امکانات: قیمت لحظه‌ای | ماشین‌حساب | هوش مصنوعی"), font_tiny, (150, 150, 150))
+    draw_rtl_text(draw, (width-50, height-70), fa_text("Digi Navasan"), font_small, text_gold)
 
     bio = BytesIO()
     img.save(bio, format="PNG")
@@ -309,7 +309,6 @@ async def update_cache_task():
                     usdt_lines.append(f"\n📊 اختلاف: `{diff:,}` تومان")
             PRICE_CACHE["usdt"] = f"💵 **مقایسه قیمت تتر (USDT)**\n⏰ `{time_str}`\n\n" + "\n".join(usdt_lines)
 
-            # آپدیت INFO_CACHE برای اینفوگرافیک
             INFO_CACHE = {
                 "dollar": get_nerkh_price('dollar'), "euro": get_nerkh_price('euro'),
                 "gold_18": PRICE_CACHE["gold_18_num"], "coin": get_nerkh_price('coin'),
@@ -421,8 +420,7 @@ def get_main_menu():
         [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
         [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="💵 مقایسه قیمت تتر")],
         [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
-        [KeyboardButton(text="🌤 وضعیت آب‌وهوا"), KeyboardButton(text="🤖 چت با هوش مصنوعی")],
-        [KeyboardButton(text="🚨 آلارم قیمتی")]
+        [KeyboardButton(text="🌤 وضعیت آب‌وهوا"), KeyboardButton(text="🤖 چت با هوش مصنوعی")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -435,7 +433,7 @@ dp = Dispatcher()
 async def command_start_handler(message: Message) -> None:
     if message.chat.type != ChatType.PRIVATE: return
     user_states.pop(message.from_user.id, None)
-    await message.answer("سلام! به ربات دیجی نوسان در بله خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:", reply_markup=get_main_menu())
+    await message.answer("سلام مصطفی عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:", reply_markup=get_main_menu())
 
 @dp.message()
 async def handle_message(message: Message) -> None:
@@ -445,7 +443,7 @@ async def handle_message(message: Message) -> None:
     user_id = message.from_user.id
     current_state = user_states.get(user_id)
 
-    if text == "🔙 بازگشت به منوی اصلی":
+    if text == "🔙 بازگشت به منوی اصلی" or text == "🚀 استارت / منوی اصلی" or text == "/start":
         user_states.pop(user_id, None)
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
@@ -467,7 +465,8 @@ async def handle_message(message: Message) -> None:
             user_states[user_id] = {"state": "gold_waiting_weight", "price": gold_price}
             await message.answer("⚖️ حالا وزن طلا را به **گرم** وارد کنید (مثلاً: 5):", reply_markup=get_back_menu())
         except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای قیمت وارد کنید.", reply_markup=get_back_menu())
-            
+        return
+          
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_weight":
         try:
             weight = float(text.replace(',', ''))
@@ -476,6 +475,7 @@ async def handle_message(message: Message) -> None:
             current_state["state"] = "gold_waiting_wage"
             await message.answer("🛠 درصد اجرت ساخت را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
         except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.", reply_markup=get_back_menu())
+        return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_wage":
         try:
@@ -485,6 +485,7 @@ async def handle_message(message: Message) -> None:
             current_state["state"] = "gold_waiting_profit"
             await message.answer("🏪 درصد سود فروشنده را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
         except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_profit":
         try:
@@ -494,6 +495,7 @@ async def handle_message(message: Message) -> None:
             current_state["state"] = "gold_waiting_tax"
             await message.answer("📄 درصد مالیات بر ارزش افزوده را وارد کنید (معمولاً 9):", reply_markup=get_back_menu())
         except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_tax":
         try:
@@ -510,6 +512,7 @@ async def handle_message(message: Message) -> None:
             await message.answer(msg, reply_markup=get_main_menu())
             user_states.pop(user_id, None) 
         except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
+        return
 
     # ------------------ ماشین‌حساب اقساط (وام) ------------------
     elif current_state == "loan_waiting_amount":
@@ -519,6 +522,7 @@ async def handle_message(message: Message) -> None:
             user_states[user_id] = {"state": "loan_waiting_interest", "amount": amount}
             await message.answer("📈 نرخ سود سالانه را وارد کنید (بدون سود=0):", reply_markup=get_back_menu())
         except ValueError: await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.", reply_markup=get_back_menu())
+        return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_interest":
         try:
@@ -528,6 +532,7 @@ async def handle_message(message: Message) -> None:
             current_state["state"] = "loan_waiting_months"
             await message.answer("⏳ تعداد ماه‌های بازپرداخت:", reply_markup=get_back_menu())
         except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
+        return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_months":
         try:
@@ -547,20 +552,24 @@ async def handle_message(message: Message) -> None:
             await message.answer(msg, reply_markup=get_main_menu())
             user_states.pop(user_id, None)
         except ValueError: await message.answer("❌ لطفاً یک عدد صحیح وارد کنید.", reply_markup=get_back_menu())
+        return
 
     # ------------------ آب‌وهوا ------------------
     elif current_state == "waiting_for_city":
         await message.answer(f"⏳ در حال دریافت آب‌وهوای {text}...")
         await message.answer(await asyncio.to_thread(get_weather, text), reply_markup=get_main_menu())
         user_states.pop(user_id, None)
+        return
         
     # ------------------ منوی اصلی ------------------
-    elif text == "🚀 استارت / منوی اصلی" or text == "/start":
-        await command_start_handler(message)
-    elif text == "💱 قیمت ارزها": await message.answer(gen_fiat_msg())
-    elif text == "🌕 قیمت طلا و سکه": await message.answer(gen_gold_msg())
-    elif text == "🪙 قیمت ارز دیجیتال": await message.answer(gen_crypto_msg())
-    elif text == "💵 مقایسه قیمت تتر": await message.answer(gen_usdt_msg())
+    if text == "💱 قیمت ارزها": 
+        await message.answer(gen_fiat_msg())
+    elif text == "🌕 قیمت طلا و سکه": 
+        await message.answer(gen_gold_msg())
+    elif text == "🪙 قیمت ارز دیجیتال": 
+        await message.answer(gen_crypto_msg())
+    elif text == "💵 مقایسه قیمت تتر": 
+        await message.answer(gen_usdt_msg())
     elif text == "🧮 ماشین‌حساب طلا":
         g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "ناموجود"
         g24 = f"{PRICE_CACHE['gold_24_num']:,}" if PRICE_CACHE['gold_24_num'] > 0 else "ناموجود"
@@ -574,12 +583,14 @@ async def handle_message(message: Message) -> None:
         await message.answer("🌤 نام شهر خود را وارد کنید:", reply_markup=get_back_menu())
         user_states[user_id] = "waiting_for_city"
     elif text == "🤖 چت با هوش مصنوعی":
-        await message.answer("🤖 سوال خود را بپرسید:")
-    elif text == "🚨 آلارم قیمتی":
-        await message.answer(f"⏳ بخش {text} در حال توسعه است.")
-    else:
+        user_states[user_id] = "ai_chat_mode"
+        await message.answer("🤖 حالت چت با هوش مصنوعی فعال شد. سوال خود را بپرسید:", reply_markup=get_back_menu())
+    elif current_state == "ai_chat_mode":
         await message.answer("⏳ در حال پردازش...")
-        await message.answer(await asyncio.to_thread(get_ai_response, text))
+        await message.answer(await asyncio.to_thread(get_ai_response, text), reply_markup=get_back_menu())
+    else:
+        # اگر دکمه‌ای نبود و در استیت خاصی هم نبود، پیش‌فرض بفرست به هوش مصنوعی یا راهنمایی منو
+        await message.answer("لطفاً یکی از گزینه‌های منو را انتخاب کنید یا برای چت با هوش مصنوعی، دکمه مربوطه را بزنید.", reply_markup=get_main_menu())
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())

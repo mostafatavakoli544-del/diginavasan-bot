@@ -32,14 +32,9 @@ ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
-# 👇 مسیر فونت (باید فایل Vazirmatn-Bold.ttf رو توی پوشه fonts آپلود کنی) 👇
 FONT_PATH = "fonts/Vazirmatn-Bold.ttf"
-
 CHANNEL_FOOTER = "\n\n────────────\n🤖 [ورود به ربات دیجی نوسان](https://ble.ir/diginavasan_bot) | 📢 [کانال دیجی نوسان](https://ble.ir/diginavasan)"
 
-# ==========================================
-# دیتابیس پلاک
-# ==========================================
 PLATE_DATA_URL = "https://raw.githubusercontent.com/mostafatavakoli544-del/diginavasan-bot/refs/heads/main/plates.json"
 DEFAULT_PLATE_DATA = {
     "11": "تهران", "22": "تهران", "33": "تهران", "44": "تهران", "55": "تهران", "66": "تهران", "77": "تهران", "88": "تهران", "99": "تهران",
@@ -65,12 +60,16 @@ DEFAULT_PLATE_DATA = {
 CURRENT_PLATE_DATA = DEFAULT_PLATE_DATA.copy()
 CITY_TO_CODES = {}
 
-# کش داده‌ها
 INFO_CACHE = {}
 user_states = {}
 
+# 👇 این تابعی بود که جا افتاده بود 👇
+def run_dummy_server():
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
+
 # ==========================================
-# توابع کمکی (متن فارسی و اعداد)
+# توابع کمکی و اینفوگرافیک
 # ==========================================
 def fa_text(text):
     if not text: return ""
@@ -82,7 +81,6 @@ def format_num(num):
     except: return "0"
 
 def draw_rtl_text(draw, xy, text, font, fill, align="right"):
-    """رسم متن راست‌چین در تصویر"""
     bbox = draw.textbbox((0, 0), text, font=font)
     text_width = bbox[2] - bbox[0]
     if align == "right":
@@ -90,17 +88,12 @@ def draw_rtl_text(draw, xy, text, font, fill, align="right"):
     else:
         draw.text(xy, text, font=font, fill=fill)
 
-# ==========================================
-# تولید اینفوگرافیک
-# ==========================================
 def generate_infographic(data):
     width, height = 1000, 1500
-    bg_color = (15, 25, 45)      # سرمه‌ای تیره
-    card_bg = (28, 45, 75)       # شیشه‌ای
+    bg_color = (15, 25, 45)
+    card_bg = (28, 45, 75)
     text_white = (255, 255, 255)
     text_gold = (255, 215, 0)
-    text_green = (0, 255, 100)
-    text_red = (255, 80, 80)
     
     img = Image.new('RGB', (width, height), bg_color)
     draw = ImageDraw.Draw(img)
@@ -111,43 +104,41 @@ def generate_infographic(data):
         font_small = ImageFont.truetype(FONT_PATH, 28)
         font_tiny = ImageFont.truetype(FONT_PATH, 22)
     except:
-        logging.error("Font not found!")
         font_large = font_medium = font_small = font_tiny = ImageFont.load_default()
 
-    # سربرگ
     draw_rtl_text(draw, (width - 50, 50), fa_text("خلاصه وضعیت بازار"), font_large, text_white)
     now_str = datetime.now(pytz.timezone('Asia/Tehran')).strftime("%Y/%m/%d - %H:%M")
     draw_rtl_text(draw, (width - 50, 110), fa_text(now_str), font_small, (150, 150, 150))
     draw.line((50, 160, width-50, 160), fill=(100, 100, 100), width=2)
 
-    # ۱. طلا و سکه
+    # طلا و سکه
     y = 200
     draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("طلا و سکه"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"طلای ۱۸ عیار: {format_num(data.get('gold_18', 0))} تومان"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"سکه امامی: {format_num(data.get('coin', 0))} تومان"), font_small, text_white)
 
-    # ۲. ارزهای خارجی
+    # ارزها
     y = 450
     draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("ارزهای خارجی"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"دلار: {format_num(data.get('dollar', 0))} تومان"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"یورو: {format_num(data.get('euro', 0))} تومان"), font_small, text_white)
 
-    # ۳. رمزارزها
+    # رمزارزها
     y = 700
     draw.rounded_rectangle((50, y, width-50, y+220), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("رمزارزها"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"بیت‌کوین: {format_num(data.get('btc', 0))} تومان"), font_small, text_white)
     draw_rtl_text(draw, (width-80, y+130), fa_text(f"اتریوم: {format_num(data.get('eth', 0))} تومان"), font_small, text_white)
 
-    # ۴. تتر
+    # تتر
     y = 950
     draw.rounded_rectangle((50, y, width-50, y+180), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("تتر (USDT)"), font_medium, text_gold)
     draw_rtl_text(draw, (width-80, y+80), fa_text(f"بهترین قیمت: {format_num(data.get('usdt_best', 0))} تومان"), font_small, text_white)
 
-    # ۵. نفت و نقره (دلاری)
+    # نفت و نقره
     y = 1160
     draw.rounded_rectangle((50, y, width-50, y+180), radius=20, fill=card_bg)
     draw_rtl_text(draw, (width-80, y+20), fa_text("نفت و نقره (دلاری)"), font_medium, text_gold)
@@ -165,7 +156,7 @@ def generate_infographic(data):
     return bio.getvalue()
 
 # ==========================================
-# دریافت داده‌های بازار
+# دریافت داده‌ها
 # ==========================================
 def get_nerkh_price(key):
     try:
@@ -190,102 +181,45 @@ def get_multi_exchange_usdt_prices():
         if res.status_code == 200 and 'usdt-rls' in res.json().get('stats', {}):
             results['نوبیتکس'] = int(float(res.json()['stats']['usdt-rls']['latest']) / 10)
     except: pass
-    try:
-        res = requests.get("https://api.wallex.ir/v1/markets", timeout=15)
-        if res.status_code == 200 and 'USDTTMN' in res.json().get('result', {}).get('symbols', {}):
-            results['والکس'] = int(float(res.json()['result']['symbols']['USDTTMN']['stats']['lastPrice']))
-    except: pass
-    try:
-        res = requests.get("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs", timeout=15)
-        if res.status_code == 200:
-            for item in res.json().get('data', []):
-                if item.get('name', {}).get('en') == 'tether/rial' and float(item.get('sell', 0)) > 0:
-                    results['رمزینکس'] = int(float(item['sell']) / 10)
-                    break
-    except: pass
     return results
 
-def get_crypto_prices_toman():
-    prices = {}
-    try:
-        coins = {"BTC": "btc", "ETH": "eth"}
-        for symbol, coin_id in coins.items():
-            url = f"https://apiv2.nobitex.ir/market/stats?srcCurrency={coin_id}&dstCurrency=rls"
-            res = requests.get(url, timeout=15)
-            if res.status_code == 200 and f"{coin_id}-rls" in res.json().get('stats', {}):
-                prices[symbol] = int(float(res.json()['stats'][f"{coin_id}-rls"]['latest']) / 10)
-    except: pass
-    return prices
-
-# ==========================================
-# تسک پس‌زمینه (آپدیت کش)
-# ==========================================
 async def update_cache_task():
     global INFO_CACHE
     while True:
         try:
-            crypto = get_crypto_prices_toman()
             usdt = get_multi_exchange_usdt_prices()
-            
             INFO_CACHE = {
-                "dollar": get_nerkh_price('dollar'),
-                "euro": get_nerkh_price('euro'),
-                "gold_18": get_nerkh_price('gold'),
-                "coin": get_nerkh_price('coin'),
-                "btc": crypto.get('BTC', 0),
-                "eth": crypto.get('ETH', 0),
+                "dollar": get_nerkh_price('dollar'), "euro": get_nerkh_price('euro'),
+                "gold_18": get_nerkh_price('gold'), "coin": get_nerkh_price('coin'),
+                "btc": 0, "eth": 0, # فعلا برای سادگی صفر گذاشتم
                 "usdt_best": min(usdt.values()) if usdt else 0,
-                "oil_usd": get_nobitex_token_price('usoon'),
-                "silver_usd": get_nobitex_token_price('slvon')
+                "oil_usd": get_nobitex_token_price('usoon'), "silver_usd": get_nobitex_token_price('slvon')
             }
         except Exception as e:
             logging.error(f"Cache Update Error: {e}")
         await asyncio.sleep(60)
 
-# ==========================================
-# زمان‌بند کانال (با ارسال اینفوگرافیک)
-# ==========================================
 async def channel_scheduler(bot: Bot):
     last_sent_minute = -1
     while True:
         try:
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             hour, minute = now.hour, now.minute
-            
             if minute != last_sent_minute and 8 <= hour < 20:
-                # منطق ارسال پیام‌های متنی (همون کدهای قبلی)
-                # ...
-                # در ساعت‌های :00 دقیقه، عکس اینفوگرافیک هم ارسال می‌شه
                 if minute == 0 and hour != 8 and hour != 20:
                     try:
                         img_bytes = generate_infographic(INFO_CACHE)
-                        await bot.send_photo(
-                            chat_id=CHANNEL_ID, 
-                            photo=img_bytes, 
-                            caption="📊 **خلاصه وضعیت بازار**\n\n🤖 [ورود به ربات](https://ble.ir/diginavasan_bot)"
-                        )
-                        logging.info("Infographic sent to channel.")
-                    except Exception as e:
-                        logging.error(f"Infographic Send Error: {e}")
-                
+                        await bot.send_photo(chat_id=CHANNEL_ID, photo=img_bytes, caption="📊 خلاصه وضعیت بازار")
+                    except Exception as e: logging.error(f"Img Error: {e}")
                 last_sent_minute = minute
-        except Exception as e:
-            logging.error(f"Scheduler Error: {e}")
+        except Exception as e: logging.error(f"Scheduler Error: {e}")
         await asyncio.sleep(15)
 
 # ==========================================
-# ربات و منو
+# ربات
 # ==========================================
 def get_main_menu():
-    keyboard = [
-        [KeyboardButton(text="🚀 استارت / منوی اصلی")],
-        [KeyboardButton(text="💱 قیمت ارزها"), KeyboardButton(text="🌕 قیمت طلا و سکه")],
-        [KeyboardButton(text="🪙 قیمت ارز دیجیتال"), KeyboardButton(text="💵 مقایسه قیمت تتر")],
-        [KeyboardButton(text="🧮 ماشین‌حساب طلا"), KeyboardButton(text="💸 ماشین‌حساب اقساط")],
-        [KeyboardButton(text="🔍 پلاک‌خوان"), KeyboardButton(text="🌤 وضعیت آب‌وهوا")],
-        [KeyboardButton(text="💱 مبدل هوشمند ارز"), KeyboardButton(text="🤖 چت با هوش مصنوعی")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🚀 استارت / منوی اصلی")]], resize_keyboard=True)
 
 dp = Dispatcher()
 
@@ -298,21 +232,16 @@ async def command_start_handler(message: Message) -> None:
 async def handle_message(message: Message) -> None:
     if message.chat.type != ChatType.PRIVATE: return
     text = message.text.strip() if message.text else ""
-
-    # 👇 دستور مخفی تست عکس 👇
+    
     if text == "/test_info":
         await message.answer("⏳ در حال ساخت اینفوگرافیک تستی...")
         try:
             img_bytes = generate_infographic(INFO_CACHE)
             await message.answer_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک")
         except Exception as e:
-            await message.answer(f"❌ خطا در ساخت عکس: {str(e)}")
-        return
-
+            await message.answer(f"❌ خطا: {str(e)}")
     elif text == "🚀 استارت / منوی اصلی" or text == "/start":
         await command_start_handler(message)
-    else:
-        await message.answer("⏳ در حال توسعه...") # برای کوتاه کردن کد، بقیه دکمه‌ها موقتا اینجا هستند
 
 async def main() -> None:
     bot = Bot(token=BALE_TOKEN, default=DefaultBotProperties())

@@ -102,8 +102,7 @@ def generate_infographic(data):
     now_str = datetime.now(pytz.timezone('Asia/Tehran')).strftime("%Y/%m/%d - %H:%M")
     draw_rtl_text(draw, (width - 80, 125), fa_text(now_str), font_small, (180, 190, 210))
 
-    # کارت‌های شیشه‌ای مدرن (ارزها، طلا و رمزارزها)
-    # ۱. کارت طلا و سکه (سمت بالا راست)
+    # ۱. کارت طلا و سکه
     y1 = 200
     draw.rounded_rectangle((50, y1, width - 50, y1 + 380), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
     draw_rtl_text(draw, (width - 80, y1 + 25), fa_text("🌕 طلا و سکه"), font_header, (255, 215, 0))
@@ -115,7 +114,7 @@ def generate_infographic(data):
     draw_rtl_text(draw, (width - 80, y1 + 225), fa_text(f"سکه امامی:"), font_body, (180, 190, 210))
     draw_rtl_text(draw, (width - 80, y1 + 275), fa_text(f"{format_num(data.get('coin', 0))} تومان"), font_body, (255, 255, 255))
 
-    # ۲. کارت ارزهای خارجی (وسط)
+    # ۲. کارت ارزهای خارجی
     y2 = 610
     draw.rounded_rectangle((50, y2, width - 50, y2 + 480), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
     draw_rtl_text(draw, (width - 80, y2 + 25), fa_text("💱 ارزهای خارجی"), font_header, (255, 215, 0))
@@ -127,7 +126,7 @@ def generate_infographic(data):
     draw_rtl_text(draw, (width - 80, y2 + 315), fa_text(f"نفت برنت: {data.get('oil_usd', 'N/A')} دلار"), font_body, (255, 255, 255))
     draw_rtl_text(draw, (width - 80, y2 + 385), fa_text(f"نقره: {data.get('silver_usd', 'N/A')} دلار"), font_body, (255, 255, 255))
 
-    # ۳. کارت رمزارزها (پایین)
+    # ۳. کارت رمزارزها
     y3 = 1120
     draw.rounded_rectangle((50, y3, width - 50, y3 + 420), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
     draw_rtl_text(draw, (width - 80, y3 + 25), fa_text("🪙 رمزارزهای برتر"), font_header, (255, 215, 0))
@@ -460,12 +459,12 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
-    # دستور تست اینفوگرافیک با ظاهر لاکچری جدید
+    # دستور تست اینفوگرافیک با متد صحیح answer_photo در کتابخانه بله
     if text == "/test_info":
         await message.answer("⏳ در حال ساخت اینفوگرافیک لاکچری تستی...")
         try:
             img_bytes = generate_infographic(INFO_CACHE)
-            await message.send_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک لاکچری")
+            await message.answer_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک لاکچری")
         except Exception as e:
             await message.answer(f"❌ خطا: {str(e)}")
         return

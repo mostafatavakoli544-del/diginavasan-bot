@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import requests
 import threading
@@ -7,18 +8,27 @@ import socketserver
 import pytz
 import asyncio
 import jdatetime
-import json
 from datetime import datetime
 from io import BytesIO
+
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
-from bidi.algorithm import get_display
+try:
+    from bidi.algorithm import get_display
+except ImportError:
+    from bidi import get_display
 
 from baleio import Bot, Dispatcher, md
 from baleio.client.default import DefaultBotProperties
 from baleio.enums import ChatType
 from baleio.filters import CommandStart
 from baleio.types import Message, ReplyKeyboardMarkup, KeyboardButton
+
+# فایل مخصوص ارسال عکس (ارسال bytes خام خطا می‌دهد)
+try:
+    from baleio.types import BufferedInputFile
+except Exception:
+    BufferedInputFile = None
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -32,7 +42,14 @@ ADMIN_ID = 718840144
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 BRS_API_KEY = os.environ.get("BRS_API_KEY")
 
-FONT_PATH = "fonts/Vazirmatn-Bold.ttf"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# فونت: اول font.ttf کنار همین فایل، بعد پوشه‌ی fonts
+FONT_CANDIDATES = [
+    os.path.join(BASE_DIR, "font.ttf"),
+    os.path.join(BASE_DIR, "fonts", "Vazirmatn-Bold.ttf"),
+]
+FONT_PATH = next((f for f in FONT_CANDIDATES if os.path.exists(f)), FONT_CANDIDATES[0])
+
 CHANNEL_FOOTER = "\n\n────────────\n🤖 [ورود به ربات دیجی نوسان](https://ble.ir/diginavasan_bot) | 📢 [کانال دیجی نوسان](https://ble.ir/diginavasan)"
 
 # ==========================================
@@ -50,19 +67,35 @@ user_states = {}
 # ==========================================
 def run_dummy_server():
     Handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), Handler) as httpd: httpd.serve_forever()
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        httpd.serve_forever()
 
 # ==========================================
-# توابع کمکی و اینفوگرافیک لاکچری و مدرن
+# توابع کمکی و اینفوگرافیک
 # ==========================================
+def as_photo(img_bytes, filename="infographic.png"):
+    """تبدیل bytes به فایل قابل ارسال برای send_photo"""
+    if BufferedInputFile is not None:
+        return BufferedInputFile(img_bytes, filename=filename)
+    return img_bytes
+
 def fa_text(text):
-    if not text: return ""
+    if not text:
+        return ""
     reshaped = arabic_reshaper.reshape(str(text))
     return get_display(reshaped)
 
 def format_num(num):
-    try: return f"{int(float(num)):,}"
-    except: return "0"
+    try:
+        return f"{int(float(num)):,}"
+    except Exception:
+        return "0"
+
+def format_usd(value):
+    try:
+        return f"{float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "N/A"
 
 def draw_rtl_text(draw, xy, text, font, fill, align="right"):
     bbox = draw.textbbox((0, 0), text, font=font)
@@ -82,87 +115,116 @@ def create_luxury_gradient_bg(width, height):
         draw.line([(0, y), (width, y)], fill=(r, g, b))
     return base
 
+def load_fonts():
+    try:
+        return (
+            ImageFont.truetype(FONT_PATH, 55),
+            ImageFont.truetype(FONT_PATH, 36),
+            ImageFont.truetype(FONT_PATH, 30),
+            ImageFont.truetype(FONT_PATH, 24),
+        )
+    except Exception as e:
+        logging.warning(f"Font load failed ({FONT_PATH}): {e}")
+        default = ImageFont.load_default()
+        return default, default, default, default
+
 def generate_infographic(data):
     width, height = 1080, 1920
     img = create_luxury_gradient_bg(width, height)
     draw = ImageDraw.Draw(img)
 
-    try:
-        font_title = ImageFont.truetype(FONT_PATH, 55)
-        font_header = ImageFont.truetype(FONT_PATH, 36)
-        font_body = ImageFont.truetype(FONT_PATH, 30)
-        font_small = ImageFont.truetype(FONT_PATH, 24)
-    except:
-        font_title = font_header = font_body = font_small = ImageFont.load_default()
+    font_title, font_header, font_body, font_small = load_fonts()
 
-    # هدر لاکچری بالا
+    gold_color = (255, 215, 0)
+    white = (255, 255, 255)
+    gray = (180, 190, 210)
+    card_fill = (20, 32, 54)
+    card_outline = (70, 95, 140)
+    line_color = (45, 65, 100)
+
+    # هدر بالا
     header_box = (50, 40, width - 50, 160)
     draw.rounded_rectangle(header_box, radius=24, fill=(24, 38, 64), outline=(218, 165, 32), width=3)
-    draw_rtl_text(draw, (width - 80, 70), fa_text("✨ دیجی نوسان | خلاصه بازار"), font_title, (255, 215, 0))
+    draw_rtl_text(draw, (width - 80, 62), fa_text("دیجی نوسان | خلاصه بازار"), font_title, gold_color)
     now_str = datetime.now(pytz.timezone('Asia/Tehran')).strftime("%Y/%m/%d - %H:%M")
-    draw_rtl_text(draw, (width - 80, 125), fa_text(now_str), font_small, (180, 190, 210))
+    draw_rtl_text(draw, (width - 80, 125), fa_text(now_str), font_small, gray)
 
     # ۱. کارت طلا و سکه
     y1 = 200
-    draw.rounded_rectangle((50, y1, width - 50, y1 + 380), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
-    draw_rtl_text(draw, (width - 80, y1 + 25), fa_text("🌕 طلا و سکه"), font_header, (255, 215, 0))
-    draw.line((80, y1 + 80, width - 80, y1 + 80), fill=(45, 65, 100), width=2)
-    
-    draw_rtl_text(draw, (width - 80, y1 + 105), fa_text(f"طلای ۱۸ عیار:"), font_body, (180, 190, 210))
-    draw_rtl_text(draw, (width - 80, y1 + 155), fa_text(f"{format_num(data.get('gold_18', 0))} تومان"), font_body, (255, 255, 255))
-    
-    draw_rtl_text(draw, (width - 80, y1 + 225), fa_text(f"سکه امامی:"), font_body, (180, 190, 210))
-    draw_rtl_text(draw, (width - 80, y1 + 275), fa_text(f"{format_num(data.get('coin', 0))} تومان"), font_body, (255, 255, 255))
+    draw.rounded_rectangle((50, y1, width - 50, y1 + 380), radius=22, fill=card_fill, outline=card_outline, width=2)
+    draw_rtl_text(draw, (width - 80, y1 + 25), fa_text("طلا و سکه"), font_header, gold_color)
+    draw.line((80, y1 + 80, width - 80, y1 + 80), fill=line_color, width=2)
+    draw_rtl_text(draw, (width - 80, y1 + 105), fa_text("طلای ۱۸ عیار:"), font_body, gray)
+    draw_rtl_text(draw, (width - 80, y1 + 155), fa_text(f"{format_num(data.get('gold_18', 0))} تومان"), font_body, white)
+    draw_rtl_text(draw, (width - 80, y1 + 225), fa_text("سکه امامی:"), font_body, gray)
+    draw_rtl_text(draw, (width - 80, y1 + 275), fa_text(f"{format_num(data.get('coin', 0))} تومان"), font_body, white)
 
     # ۲. کارت ارزهای خارجی
     y2 = 610
-    draw.rounded_rectangle((50, y2, width - 50, y2 + 480), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
-    draw_rtl_text(draw, (width - 80, y2 + 25), fa_text("💱 ارزهای خارجی"), font_header, (255, 215, 0))
-    draw.line((80, y2 + 80, width - 80, y2 + 80), fill=(45, 65, 100), width=2)
-
-    draw_rtl_text(draw, (width - 80, y2 + 105), fa_text(f"دلار: {format_num(data.get('dollar', 0))} تومان"), font_body, (255, 255, 255))
-    draw_rtl_text(draw, (width - 80, y2 + 175), fa_text(f"یورو: {format_num(data.get('euro', 0))} تومان"), font_body, (255, 255, 255))
-    draw_rtl_text(draw, (width - 80, y2 + 245), fa_text(f"تتر (بهترین): {format_num(data.get('usdt_best', 0))} تومان"), font_body, (255, 255, 255))
-    draw_rtl_text(draw, (width - 80, y2 + 315), fa_text(f"نفت برنت: {data.get('oil_usd', 'N/A')} دلار"), font_body, (255, 255, 255))
-    draw_rtl_text(draw, (width - 80, y2 + 385), fa_text(f"نقره: {data.get('silver_usd', 'N/A')} دلار"), font_body, (255, 255, 255))
+    draw.rounded_rectangle((50, y2, width - 50, y2 + 480), radius=22, fill=card_fill, outline=card_outline, width=2)
+    draw_rtl_text(draw, (width - 80, y2 + 25), fa_text("ارزهای خارجی"), font_header, gold_color)
+    draw.line((80, y2 + 80, width - 80, y2 + 80), fill=line_color, width=2)
+    draw_rtl_text(draw, (width - 80, y2 + 105), fa_text(f"دلار: {format_num(data.get('dollar', 0))} تومان"), font_body, white)
+    draw_rtl_text(draw, (width - 80, y2 + 175), fa_text(f"یورو: {format_num(data.get('euro', 0))} تومان"), font_body, white)
+    draw_rtl_text(draw, (width - 80, y2 + 245), fa_text(f"تتر (بهترین): {format_num(data.get('usdt_best', 0))} تومان"), font_body, white)
+    draw_rtl_text(draw, (width - 80, y2 + 315), fa_text(f"نفت برنت: {format_usd(data.get('oil_usd'))} دلار"), font_body, white)
+    draw_rtl_text(draw, (width - 80, y2 + 385), fa_text(f"نقره: {format_usd(data.get('silver_usd'))} دلار"), font_body, white)
 
     # ۳. کارت رمزارزها
     y3 = 1120
-    draw.rounded_rectangle((50, y3, width - 50, y3 + 420), radius=22, fill=(20, 32, 54), outline=(70, 95, 140), width=2)
-    draw_rtl_text(draw, (width - 80, y3 + 25), fa_text("🪙 رمزارزهای برتر"), font_header, (255, 215, 0))
-    draw.line((80, y3 + 80, width - 80, y3 + 80), fill=(45, 65, 100), width=2)
-
-    draw_rtl_text(draw, (width - 80, y3 + 115), fa_text(f"بیت‌کوین: {format_num(data.get('btc', 0))} تومان"), font_body, (255, 255, 255))
-    draw_rtl_text(draw, (width - 80, y3 + 205), fa_text(f"اتریوم: {format_num(data.get('eth', 0))} تومان"), font_body, (255, 255, 255))
+    draw.rounded_rectangle((50, y3, width - 50, y3 + 420), radius=22, fill=card_fill, outline=card_outline, width=2)
+    draw_rtl_text(draw, (width - 80, y3 + 25), fa_text("رمزارزهای برتر"), font_header, gold_color)
+    draw.line((80, y3 + 80, width - 80, y3 + 80), fill=line_color, width=2)
+    draw_rtl_text(draw, (width - 80, y3 + 115), fa_text(f"بیت‌کوین: {format_num(data.get('btc', 0))} تومان"), font_body, white)
+    draw_rtl_text(draw, (width - 80, y3 + 205), fa_text(f"اتریوم: {format_num(data.get('eth', 0))} تومان"), font_body, white)
 
     # فوتر پایین تصویر
-    draw.line((80, height - 150, width - 80, height - 150), fill=(70, 95, 140), width=1)
+    draw.line((80, height - 150, width - 80, height - 150), fill=card_outline, width=1)
     draw_rtl_text(draw, (width - 50, height - 110), fa_text("قیمت لحظه‌ای | ماشین‌حساب | تحلیل هوشمند"), font_small, (160, 175, 200))
-    draw_rtl_text(draw, (width - 50, height - 70), fa_text("Digi Navasan Channel & Bot"), font_small, (255, 215, 0))
+    draw_rtl_text(draw, (width - 50, height - 70), "Digi Navasan Channel & Bot", font_small, gold_color)
 
     bio = BytesIO()
     img.save(bio, format="PNG")
-    bio.seek(0)
     return bio.getvalue()
 
 # ==========================================
 # دریافت اطلاعات قیمت‌ها
 # ==========================================
-def get_nerkh_price(key):
+_NERKH_CACHE = {"time": 0, "rates": {}}
+
+def get_nerkh_rates():
+    """یک بار دریافت و ۲۰ ثانیه نگه‌داری (به‌جای ده‌ها درخواست تکراری)"""
+    now = time.time()
+    if _NERKH_CACHE["rates"] and now - _NERKH_CACHE["time"] < 20:
+        return _NERKH_CACHE["rates"]
     try:
         res = requests.get("https://nerkh.jahankhahan.shop/data/live.json", timeout=15)
-        if res.status_code == 200: return int(res.json()['rates'].get(key, 0))
-    except: pass
-    return 0
+        if res.status_code == 200:
+            rates = res.json().get('rates', {})
+            if rates:
+                _NERKH_CACHE["rates"] = rates
+                _NERKH_CACHE["time"] = now
+                return rates
+    except Exception:
+        pass
+    return _NERKH_CACHE["rates"]
+
+def get_nerkh_price(key):
+    try:
+        return int(float(get_nerkh_rates().get(key, 0)))
+    except Exception:
+        return 0
 
 def get_nerkh_price_safe(keys_list):
     for key in keys_list:
         p = get_nerkh_price(key)
-        if p > 0: return f"{p:,.0f}"
+        if p > 0:
+            return f"{p:,.0f}"
     return "ناموجود"
 
 def format_price(price_str):
-    if price_str == "ناموجود": return price_str
+    if price_str == "ناموجود":
+        return price_str
     return f"`{price_str}` تومان"
 
 def get_nobitex_token_price(symbol):
@@ -171,7 +233,8 @@ def get_nobitex_token_price(symbol):
         res = requests.get(url, timeout=15)
         if res.status_code == 200 and f"{symbol}-usdt" in res.json().get('stats', {}):
             return float(res.json()['stats'][f"{symbol}-usdt"]['latest'])
-    except: pass
+    except Exception:
+        pass
     return None
 
 def get_multi_exchange_usdt_prices():
@@ -181,12 +244,14 @@ def get_multi_exchange_usdt_prices():
         res = requests.get("https://apiv2.nobitex.ir/market/stats?srcCurrency=usdt&dstCurrency=rls", headers=headers, timeout=15)
         if res.status_code == 200 and 'usdt-rls' in res.json().get('stats', {}):
             results['نوبیتکس'] = int(float(res.json()['stats']['usdt-rls']['latest']) / 10)
-    except: pass
+    except Exception:
+        pass
     try:
         res = requests.get("https://api.wallex.ir/v1/markets", headers=headers, timeout=15)
         if res.status_code == 200 and 'USDTTMN' in res.json().get('result', {}).get('symbols', {}):
             results['والکس'] = int(float(res.json()['result']['symbols']['USDTTMN']['stats']['lastPrice']))
-    except: pass
+    except Exception:
+        pass
     try:
         res = requests.get("https://publicapi.ramzinex.com/exchange/api/v1.0/exchange/pairs", headers=headers, timeout=15)
         if res.status_code == 200:
@@ -194,7 +259,8 @@ def get_multi_exchange_usdt_prices():
                 if item.get('name', {}).get('en') == 'tether/rial' and float(item.get('sell', 0)) > 0:
                     results['رمزینکس'] = int(float(item['sell']) / 10)
                     break
-    except: pass
+    except Exception:
+        pass
     try:
         res = requests.get("https://api.bitpin.ir/api/v1/mkt/tickers/", headers=headers, timeout=15)
         if res.status_code == 200:
@@ -202,12 +268,14 @@ def get_multi_exchange_usdt_prices():
                 if item.get('symbol') == 'USDT_IRT':
                     results['بیت‌پین'] = int(float(item.get('price')))
                     break
-    except: pass
+    except Exception:
+        pass
     try:
         res = requests.get("https://api.tabdeal.org/api/v1/market/statistics", headers=headers, timeout=15)
         if res.status_code == 200 and 'USDTIRT' in res.json():
             results['تبدیل'] = int(float(res.json()['USDTIRT'].get('lastPrice', 0)))
-    except: pass
+    except Exception:
+        pass
     return results
 
 def get_crypto_prices_toman():
@@ -222,17 +290,29 @@ def get_crypto_prices_toman():
                 if key in res.json().get('stats', {}):
                     prices[symbol] = f"{int(float(res.json()['stats'][key]['latest']) / 10):,.0f}"
         return prices
-    except: return {}
+    except Exception:
+        return {}
 
 def get_ai_response(prompt):
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        data = {"model": "openai/gpt-oss-120b", "messages": [{"role": "system", "content": "You are a helpful assistant. Answer in Persian."}, {"role": "user", "content": prompt}], "temperature": 0.7, "max_tokens": 1024}
+        data = {
+            "model": "openai/gpt-oss-120b",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant. Answer in Persian."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1024
+        }
         response = requests.post(url, headers=headers, json=data, timeout=30)
-        if response.status_code == 200: return response.json()['choices'][0]['message']['content']
-        else: return "خطایی در ارتباط با هوش مصنوعی رخ داد."
-    except: return "خطای اتصال به هوش مصنوعی."
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return "خطایی در ارتباط با هوش مصنوعی رخ داد."
+    except Exception:
+        return "خطای اتصال به هوش مصنوعی."
 
 def get_weather(city):
     try:
@@ -247,7 +327,8 @@ def get_weather(city):
             now = datetime.now(pytz.timezone('Asia/Tehran')).strftime('%H:%M')
             return f"🌤 **وضعیت آب‌وهوای {city}**\n\n🌡 دما: {temp} درجه سانتی‌گراد\n☁️ وضعیت: {desc}\n💧 رطوبت: {humidity}%\n⏰ آخرین به‌روزرسانی: `{now}`"
         return "❌ شهر مورد نظر پیدا نشد."
-    except Exception: return "❌ خطا در دریافت اطلاعات آب‌وهوا."
+    except Exception:
+        return "❌ خطا در دریافت اطلاعات آب‌وهوا."
 
 # ==========================================
 # ساخت پیام‌های کش ربات
@@ -257,13 +338,33 @@ def gen_gold_msg(): return PRICE_CACHE["gold"]
 def gen_crypto_msg(): return PRICE_CACHE["crypto"]
 def gen_usdt_msg(): return PRICE_CACHE["usdt"]
 
+def build_info_cache(gold_18_num, crypto, usdt_prices):
+    """داده‌های اینفوگرافیک (توابع شبکه‌ای؛ داخل thread اجرا می‌شود)"""
+    def to_int(value):
+        try:
+            return int(str(value).replace(',', ''))
+        except Exception:
+            return 0
+
+    return {
+        "dollar": get_nerkh_price('dollar'),
+        "euro": get_nerkh_price('euro'),
+        "gold_18": gold_18_num,
+        "coin": get_nerkh_price('coin'),
+        "btc": to_int(crypto.get('BTC', '0')),
+        "eth": to_int(crypto.get('ETH', '0')),
+        "usdt_best": min(usdt_prices.values()) if usdt_prices else 0,
+        "oil_usd": get_nobitex_token_price('usoon'),
+        "silver_usd": get_nobitex_token_price('slvon'),
+    }
+
 async def update_cache_task():
     global PRICE_CACHE, INFO_CACHE
     while True:
         try:
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             time_str = now.strftime('%H:%M')
-            
+
             PRICE_CACHE["fiat"] = await asyncio.to_thread(lambda: (
                 f"💱 **قیمت لحظه‌ای ارزها**\n⏰ `{time_str}`\n\n"
                 f"💵 دلار = {format_price(get_nerkh_price_safe(['dollar', 'usd']))}\n"
@@ -283,8 +384,8 @@ async def update_cache_task():
                 f"🇷🇺 روبل = {format_price(get_nerkh_price_safe(['rub']))}"
             ))
 
-            gold_18_str = get_nerkh_price_safe(['gold'])
-            gold_24_str = get_nerkh_price_safe(['gold24'])
+            gold_18_str = await asyncio.to_thread(get_nerkh_price_safe, ['gold'])
+            gold_24_str = await asyncio.to_thread(get_nerkh_price_safe, ['gold24'])
             PRICE_CACHE["gold_18_num"] = int(gold_18_str.replace(',', '')) if gold_18_str != "ناموجود" else 0
             PRICE_CACHE["gold_24_num"] = int(gold_24_str.replace(',', '')) if gold_24_str != "ناموجود" else 0
 
@@ -313,24 +414,21 @@ async def update_cache_task():
             if usdt_prices:
                 sorted_prices = sorted(usdt_prices.items(), key=lambda item: item[1])
                 for i, (exchange, price) in enumerate(sorted_prices):
-                    if i == 0: usdt_lines.append(f"🥇 **{exchange}**: `{price:,}` تومان (ارزان‌ترین)")
-                    else: usdt_lines.append(f"🔸 {exchange}: `{price:,}` تومان")
+                    if i == 0:
+                        usdt_lines.append(f"🥇 **{exchange}**: `{price:,}` تومان (ارزان‌ترین)")
+                    else:
+                        usdt_lines.append(f"🔸 {exchange}: `{price:,}` تومان")
                 if len(sorted_prices) > 1:
                     diff = sorted_prices[-1][1] - sorted_prices[0][1]
                     usdt_lines.append(f"\n📊 اختلاف: `{diff:,}` تومان")
             PRICE_CACHE["usdt"] = f"💵 **مقایسه قیمت تتر (USDT)**\n⏰ `{time_str}`\n\n" + "\n".join(usdt_lines)
 
-            INFO_CACHE = {
-                "dollar": get_nerkh_price('dollar'), "euro": get_nerkh_price('euro'),
-                "gold_18": PRICE_CACHE["gold_18_num"], "coin": get_nerkh_price('coin'),
-                "btc": int(crypto.get('BTC', '0').replace(',','')), "eth": int(crypto.get('ETH', '0').replace(',','')),
-                "usdt_best": min(usdt_prices.values()) if usdt_prices else 0,
-                "oil_usd": get_nobitex_token_price('usoon'), "silver_usd": get_nobitex_token_price('slvon')
-            }
-
+            INFO_CACHE = await asyncio.to_thread(
+                build_info_cache, PRICE_CACHE["gold_18_num"], crypto, usdt_prices
+            )
             PRICE_CACHE["last_update"] = time_str
         except Exception as e:
-            logging.error(f"Cache update error: {e}")
+            logging.exception(f"Cache update error: {e}")
         await asyncio.sleep(30)
 
 # ==========================================
@@ -349,7 +447,8 @@ async def fetch_bourse_msg():
                 f"🔴 وضعیت بازار: `{data.get('state', 'نامشخص')}`\n"
             )
         return "❌ خطا در دریافت بورس."
-    except Exception: return "❌ خطا در دریافت بورس."
+    except Exception:
+        return "❌ خطا در دریافت بورس."
 
 async def fetch_kala_msg():
     today = jdatetime.date.today()
@@ -370,8 +469,10 @@ async def fetch_kala_msg():
                     for item in top_items:
                         msg += f"🔹 **{item.get('l30', 'نامشخص')}**\n🏭 {item.get('producer', 'نامشخص')}\n💰 `{item.get('pc', 0) / 10:,.0f}` تومان | 📦 `{item.get('volume_contract') or 0:,}` تن\n\n"
                     return msg + "_(بر اساس ۱۰ کالای برتر)_"
-            except: pass
-        elif res.status_code == 402: return "⚠️ سهمیه API کالا تمام شده است."
+            except Exception:
+                pass
+        elif res.status_code == 402:
+            return "⚠️ سهمیه API کالا تمام شده است."
         await asyncio.sleep(1)
     return "⚠️ در ۷ روز گذشته معامله‌ای ثبت نشده است."
 
@@ -381,8 +482,9 @@ async def channel_scheduler(bot: Bot):
         try:
             now = datetime.now(pytz.timezone('Asia/Tehran'))
             hour, minute = now.hour, now.minute
-            
-            if minute != last_sent_minute and 8 <= hour < 20:
+            # بازه‌ی ارسال: ۸ تا ۱۹:۵۹ و همچنین دقیقه‌ی ۲۰:۰۰ برای پیام شب‌بخیر
+            in_window = (8 <= hour < 20) or (hour == 20 and minute == 0)
+            if minute != last_sent_minute and in_window:
                 current_time = f"{hour:02d}:{minute:02d}"
                 msg_to_send = None
                 send_infographic = False
@@ -410,16 +512,20 @@ async def channel_scheduler(bot: Bot):
                     logging.info(f"Channel message sent at {current_time}")
                     last_sent_minute = minute
 
-                if send_infographic:
-                    await asyncio.sleep(3)
-                    try:
-                        img_bytes = generate_infographic(INFO_CACHE)
-                        await bot.send_photo(chat_id=CHANNEL_ID, photo=img_bytes, caption="📊 خلاصه وضعیت بازار")
-                    except Exception as e: logging.error(f"Infographic Send Error: {e}")
-
+                    if send_infographic:
+                        await asyncio.sleep(3)
+                        try:
+                            img_bytes = await asyncio.to_thread(generate_infographic, INFO_CACHE)
+                            await bot.send_photo(
+                                chat_id=CHANNEL_ID,
+                                photo=as_photo(img_bytes),
+                                caption="📊 خلاصه وضعیت بازار"
+                            )
+                            logging.info("Infographic sent")
+                        except Exception as e:
+                            logging.exception(f"Infographic Send Error: {e}")
         except Exception as e:
-            logging.error(f"Scheduler Error: {e}")
-        
+            logging.exception(f"Scheduler Error: {e}")
         await asyncio.sleep(15)
 
 # ==========================================
@@ -442,14 +548,15 @@ dp = Dispatcher()
 
 @dp.message(CommandStart())
 async def command_start_handler(message: Message) -> None:
-    if message.chat.type != ChatType.PRIVATE: return
+    if message.chat.type != ChatType.PRIVATE:
+        return
     user_states.pop(message.from_user.id, None)
     await message.answer("سلام مصطفی عزیز! به ربات دیجی نوسان خوش آمدید. ✅\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید:", reply_markup=get_main_menu())
 
 @dp.message()
 async def handle_message(message: Message) -> None:
-    if message.chat.type != ChatType.PRIVATE: return
-
+    if message.chat.type != ChatType.PRIVATE:
+        return
     text = message.text.strip() if message.text else ""
     user_id = message.from_user.id
     current_state = user_states.get(user_id)
@@ -459,111 +566,128 @@ async def handle_message(message: Message) -> None:
         await message.answer("به منوی اصلی بازگشتید.", reply_markup=get_main_menu())
         return
 
-    # دستور تست اینفوگرافیک با ارسال صحیح عکس
+    # دستور تست اینفوگرافیک
     if text == "/test_info":
-        await message.answer("⏳ در حال ساخت اینفوگرافیک لاکچری تستی...")
+        await message.answer("⏳ در حال ساخت اینفوگرافیک تستی...")
         try:
-            img_bytes = generate_infographic(INFO_CACHE)
-            await message.answer_photo(photo=img_bytes, caption="📊 تست اینفوگرافیک لاکچری")
+            img_bytes = await asyncio.to_thread(generate_infographic, INFO_CACHE)
+            await message.answer_photo(photo=as_photo(img_bytes), caption="📊 تست اینفوگرافیک")
         except Exception as e:
-            await message.answer(f"❌ خطا: {str(e)}")
+            logging.exception("test_info error")
+            await message.answer(f"❌ خطا: {type(e).__name__}: {str(e)}")
         return
 
     # ------------------ ماشین‌حساب طلا ------------------
     if current_state == "gold_waiting_price":
         try:
             gold_price = float(text.replace(',', ''))
-            if gold_price <= 0: raise ValueError
+            if gold_price <= 0:
+                raise ValueError
             user_states[user_id] = {"state": "gold_waiting_weight", "price": gold_price}
             await message.answer("⚖️ حالا وزن طلا را به **گرم** وارد کنید (مثلاً: 5):", reply_markup=get_back_menu())
-        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای قیمت وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای قیمت وارد کنید.", reply_markup=get_back_menu())
         return
-          
+
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_weight":
         try:
             weight = float(text.replace(',', ''))
-            if weight <= 0: raise ValueError
+            if weight <= 0:
+                raise ValueError
             current_state["weight"] = weight
             current_state["state"] = "gold_waiting_wage"
             await message.answer("🛠 درصد اجرت ساخت را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
-        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای وزن وارد کنید.", reply_markup=get_back_menu())
         return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_wage":
         try:
             wage_pct = float(text)
-            if wage_pct < 0: raise ValueError
+            if wage_pct < 0:
+                raise ValueError
             current_state["wage_pct"] = wage_pct
             current_state["state"] = "gold_waiting_profit"
             await message.answer("🏪 درصد سود فروشنده را وارد کنید (اگر ندارد، 0 بزنید):", reply_markup=get_back_menu())
-        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
         return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_profit":
         try:
             profit_pct = float(text)
-            if profit_pct < 0: raise ValueError
+            if profit_pct < 0:
+                raise ValueError
             current_state["profit_pct"] = profit_pct
             current_state["state"] = "gold_waiting_tax"
             await message.answer("📄 درصد مالیات بر ارزش افزوده را وارد کنید (معمولاً 9):", reply_markup=get_back_menu())
-        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر برای درصد وارد کنید.", reply_markup=get_back_menu())
         return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "gold_waiting_tax":
         try:
             tax_pct = float(text)
-            if tax_pct < 0: raise ValueError
+            if tax_pct < 0:
+                raise ValueError
             price = current_state["price"]
             weight = current_state["weight"]
             wage = (weight * price) * (current_state["wage_pct"] / 100)
             profit = (weight * price) * (current_state["profit_pct"] / 100)
             tax = ((weight * price) + wage + profit) * (tax_pct / 100)
             total = (weight * price) + wage + profit + tax
-            
             msg = f"🧮 **نتیجه محاسبه طلا**\n\n💰 قیمت هر گرم: `{price:,.0f}`\n⚖️ وزن: `{weight}` گرم\n📦 قیمت خام: `{weight * price:,.0f}`\n🛠 اجرت ({current_state['wage_pct']}٪): `{wage:,.0f}`\n🏪 سود ({current_state['profit_pct']}٪): `{profit:,.0f}`\n📄 مالیات ({tax_pct}٪): `{tax:,.0f}`\n\n✅ **مبلغ نهایی: `{total:,.0f}` تومان**"
             await message.answer(msg, reply_markup=get_main_menu())
-            user_states.pop(user_id, None) 
-        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
+            user_states.pop(user_id, None)
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
         return
 
     # ------------------ ماشین‌حساب اقساط (وام) ------------------
     elif current_state == "loan_waiting_amount":
         try:
             amount = float(text.replace(',', ''))
-            if amount <= 0: raise ValueError
+            if amount <= 0:
+                raise ValueError
             user_states[user_id] = {"state": "loan_waiting_interest", "amount": amount}
             await message.answer("📈 نرخ سود سالانه را وارد کنید (بدون سود=0):", reply_markup=get_back_menu())
-        except ValueError: await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک مبلغ معتبر وارد کنید.", reply_markup=get_back_menu())
         return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_interest":
         try:
             interest = float(text)
-            if interest < 0: raise ValueError
+            if interest < 0:
+                raise ValueError
             current_state["interest"] = interest
             current_state["state"] = "loan_waiting_months"
             await message.answer("⏳ تعداد ماه‌های بازپرداخت:", reply_markup=get_back_menu())
-        except ValueError: await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد معتبر وارد کنید.", reply_markup=get_back_menu())
         return
 
     elif isinstance(current_state, dict) and current_state.get("state") == "loan_waiting_months":
         try:
             months = int(text)
-            if months <= 0: raise ValueError
+            if months <= 0:
+                raise ValueError
             amount = current_state["amount"]
             interest = current_state["interest"]
-            
             if interest == 0:
-                monthly = amount / months; total = amount; t_int = 0
+                monthly = amount / months
+                total = amount
+                t_int = 0
             else:
                 r = (interest / 100) / 12
-                monthly = amount * (r * (1 + r)**months) / ((1 + r)**months - 1)
-                total = monthly * months; t_int = total - amount
-
+                monthly = amount * (r * (1 + r) ** months) / ((1 + r) ** months - 1)
+                total = monthly * months
+                t_int = total - amount
             msg = f"💸 **نتیجه محاسبه وام**\n\n💵 مبلغ: `{amount:,.0f}`\n📈 سود: `{interest}٪`\n⏳ مدت: `{months}` ماه\n\n💳 **قسط ماهانه: `{monthly:,.0f}` تومان**\n💰 مجموع: `{total:,.0f}`\n📉 سود کل: `{t_int:,.0f}`"
             await message.answer(msg, reply_markup=get_main_menu())
             user_states.pop(user_id, None)
-        except ValueError: await message.answer("❌ لطفاً یک عدد صحیح وارد کنید.", reply_markup=get_back_menu())
+        except ValueError:
+            await message.answer("❌ لطفاً یک عدد صحیح وارد کنید.", reply_markup=get_back_menu())
         return
 
     # ------------------ آب‌وهوا ------------------
@@ -572,15 +696,15 @@ async def handle_message(message: Message) -> None:
         await message.answer(await asyncio.to_thread(get_weather, text), reply_markup=get_main_menu())
         user_states.pop(user_id, None)
         return
-        
+
     # ------------------ منوی اصلی ------------------
-    if text == "💱 قیمت ارزها": 
+    if text == "💱 قیمت ارزها":
         await message.answer(gen_fiat_msg())
-    elif text == "🌕 قیمت طلا و سکه": 
+    elif text == "🌕 قیمت طلا و سکه":
         await message.answer(gen_gold_msg())
-    elif text == "🪙 قیمت ارز دیجیتال": 
+    elif text == "🪙 قیمت ارز دیجیتال":
         await message.answer(gen_crypto_msg())
-    elif text == "💵 مقایسه قیمت تتر": 
+    elif text == "💵 مقایسه قیمت تتر":
         await message.answer(gen_usdt_msg())
     elif text == "🧮 ماشین‌حساب طلا":
         g18 = f"{PRICE_CACHE['gold_18_num']:,}" if PRICE_CACHE['gold_18_num'] > 0 else "ناموجود"

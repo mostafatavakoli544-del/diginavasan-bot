@@ -10,6 +10,7 @@ import re
 import tempfile
 import threading
 import requests
+import urllib3
 from io import BytesIO
 from urllib.parse import quote
 from datetime import datetime
@@ -21,6 +22,9 @@ import pytz
 import jdatetime
 from PIL import Image, ImageDraw, ImageFont, features
 import arabic_reshaper
+
+# خاموش کردن هشدارهای SSL (برای رد شدن از فیلتر سرورهای خارجی)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     from bidi.algorithm import get_display
@@ -92,11 +96,15 @@ def _is_positive_number(x):
 def _to_toman(value, source_publishes_rial):
     return value / 10.0 if source_publishes_rial else value
 
+# درخواست امن با غیرفعال کردن SSL و هدر مرورگر
 def _req_json(url, params=None):
     try:
-        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-        if r.status_code == 200: return r.json()
-    except Exception as e: log.error(f"Req failed {url}: {e}")
+        r = requests.get(url, params=params, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=20, verify=False)
+        if r.status_code == 200: 
+            return r.json()
+        log.error(f"Req {url} status: {r.status_code}")
+    except Exception as e: 
+        log.error(f"Req failed {url}: {e}")
     return None
 
 async def fetch_usdt(session):
